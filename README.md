@@ -183,6 +183,33 @@ Python側では主に以下の利用を想定しています。
 
 実際の依存関係は実装時に `pyproject.toml` で管理します。
 
+## 2026年9月1日ケースを実行する
+
+実行場所は、このREADMEがあるプロジェクト直下です。
+
+```bash
+cd /Users/oiso/programs/wether_sim
+./scripts/run_case_20260901.sh
+```
+
+既定では4 MPIプロセスを使います。メモリを抑えたい場合は次のように変更できます。
+
+```bash
+WRF_PROCESSES=2 ./scripts/run_case_20260901.sh
+```
+
+このケースは学校地点（35.69247912845154, 139.41296806119965）を中心に、2026年9月1日09:00～21:00 JSTを9 km → 3 km → 1 kmの3段ネストで計算します。最初の6時間はspin-up、15:00～21:00 JSTを観測比較の対象にします。入力にはMSMの大気場、GFSの4層土壌・地表面場、WPS地形データを使用します。
+
+完了後の主な成果物は `output/case_20260901/analysis/` に出力されます。
+
+- `temperature_animation.mp4`: d03の2 m気温アニメーション
+- `temperature_timeseries.png`: 学校観測とWRFの時系列比較
+- `temperature_map.png`: 気温分布図
+- `metrics.json`: Bias・MAE・RMSE
+- `temperature_difference_timeseries.png`: 学校－府中アメダスの気温差比較
+
+この実行は、観測済みの過去日時を再現するhindcastです。将来予測を行う場合は、対象時刻を未来へ変更し、その時点で利用可能な最新のMSM/GFSを取得する必要があります。
+
 ---
 
 ## ディレクトリ構成案

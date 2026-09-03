@@ -110,7 +110,7 @@ def render_namelist_input(config: ExperimentConfig) -> str:
  interval_seconds = {config.wrf.input_interval_seconds},
  input_from_file = {_values([True] * count)}
  history_interval = {fields(config.analysis.output_interval_minutes)}
- frames_per_outfile = {fields(6)}
+ frames_per_outfile = {fields(1000)}
  restart = .false.,
  io_form_history = 2,
  io_form_restart = 2,
