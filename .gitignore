@@ -17,6 +17,7 @@ wrfbdy*
 wrfout*
 rsl.out.*
 rsl.error.*
+*.log
 
 # Generated output
 output/**

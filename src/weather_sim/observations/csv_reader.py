@@ -61,8 +61,8 @@ def read_observations(path: str | Path, *, timezone_name: str = "Asia/Tokyo") ->
 
     for column in ("latitude", "longitude", "elevation_m", "value"):
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
-    if frame[["latitude", "longitude", "elevation_m"]].isna().any(axis=None):
-        raise ObservationDataError("station coordinates and elevation must be numeric")
+    if frame[["latitude", "longitude"]].isna().any(axis=None):
+        raise ObservationDataError("station coordinates must be numeric")
     if not frame["latitude"].between(-90, 90).all() or not frame["longitude"].between(-180, 180).all():
         raise ObservationDataError("station coordinates are outside valid latitude/longitude ranges")
 

@@ -144,6 +144,9 @@ class WRFConfig:
     time_step_seconds: int
     vertical_levels: int
     map_projection: str
+    metgrid_levels: int = 27
+    metgrid_soil_levels: int = 4
+    top_pressure_pa: int = 5000
 
     def __post_init__(self) -> None:
         if self.input_interval_seconds <= 0:
@@ -152,6 +155,12 @@ class WRFConfig:
             raise ConfigurationError("wrf.time_step_seconds must be positive")
         if self.vertical_levels < 10:
             raise ConfigurationError("wrf.vertical_levels must be at least 10")
+        if self.metgrid_levels < 2:
+            raise ConfigurationError("wrf.metgrid_levels must be at least 2")
+        if self.metgrid_soil_levels < 0:
+            raise ConfigurationError("wrf.metgrid_soil_levels must be non-negative")
+        if self.top_pressure_pa <= 0:
+            raise ConfigurationError("wrf.top_pressure_pa must be positive")
         if self.map_projection not in {"lambert"}:
             raise ConfigurationError("Version 1 currently supports only the Lambert projection")
 
@@ -235,6 +244,9 @@ class ExperimentConfig:
                 time_step_seconds=int(wrf.get("time_step_seconds", 54)),
                 vertical_levels=int(wrf.get("vertical_levels", 45)),
                 map_projection=str(wrf.get("map_projection", "lambert")),
+                metgrid_levels=int(wrf.get("metgrid_levels", 27)),
+                metgrid_soil_levels=int(wrf.get("metgrid_soil_levels", 4)),
+                top_pressure_pa=int(wrf.get("top_pressure_pa", 5000)),
             ),
             source_path=source_path,
         )

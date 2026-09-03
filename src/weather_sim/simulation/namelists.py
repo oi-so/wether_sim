@@ -25,11 +25,16 @@ def _dates(config: ExperimentConfig) -> tuple[datetime, datetime]:
 
 
 def _parent_start(parent: DomainConfig, child: DomainConfig) -> tuple[int, int]:
-    child_parent_intervals_x = (child.e_we - 1) // child.parent_grid_ratio
-    child_parent_intervals_y = (child.e_sn - 1) // child.parent_grid_ratio
+    # WPS indices are one-based. Align the geometric centres of parent and
+    # child; using integer interval counts here shifts each nested domain by
+    # roughly half a parent cell and compounds across nesting levels.
+    parent_center_x = (parent.e_we + 1) / 2
+    parent_center_y = (parent.e_sn + 1) / 2
+    child_half_span_x = (child.e_we - 1) / (2 * child.parent_grid_ratio)
+    child_half_span_y = (child.e_sn - 1) / (2 * child.parent_grid_ratio)
     return (
-        max(1, (parent.e_we - child_parent_intervals_x) // 2),
-        max(1, (parent.e_sn - child_parent_intervals_y) // 2),
+        max(1, round(parent_center_x - child_half_span_x)),
+        max(1, round(parent_center_y - child_half_span_y)),
     )
 
 
@@ -69,6 +74,7 @@ def render_namelist_wps(config: ExperimentConfig, geog_data_path: str) -> str:
 &ungrib
  out_format = 'WPS',
  prefix = 'FILE',
+ ordered_by_date = .false.,
 /
 
 &metgrid
@@ -118,6 +124,9 @@ def render_namelist_input(config: ExperimentConfig) -> str:
  e_we = {_values([d.e_we for d in domains])}
  e_sn = {_values([d.e_sn for d in domains])}
  e_vert = {fields(config.wrf.vertical_levels)}
+ num_metgrid_levels = {config.wrf.metgrid_levels},
+ num_metgrid_soil_levels = {config.wrf.metgrid_soil_levels},
+ p_top_requested = {config.wrf.top_pressure_pa},
  dx = {_values([d.dx_m for d in domains])}
  dy = {_values([d.dx_m for d in domains])}
  grid_id = {_values(list(range(1, count + 1)))}
