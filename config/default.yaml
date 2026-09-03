@@ -1,0 +1,46 @@
+center:
+  latitude: 35.69
+  longitude: 139.41
+
+time:
+  target_start: "2026-08-10T12:00:00+09:00"
+  target_end: "2026-08-11T00:00:00+09:00"
+  timezone: "Asia/Tokyo"
+  spinup_hours: 12
+
+domains:
+  d01:
+    dx_m: 9000
+    e_we: 100
+    e_sn: 100
+  d02:
+    dx_m: 3000
+    e_we: 100
+    e_sn: 100
+    parent: d01
+    parent_grid_ratio: 3
+  d03:
+    dx_m: 1000
+    e_we: 100
+    e_sn: 100
+    parent: d02
+    parent_grid_ratio: 3
+
+analysis:
+  radius_km: 20
+  output_interval_minutes: 10
+
+observations:
+  use_amedas: true
+  use_school: true
+
+visualization:
+  animation: true
+  animation_format: mp4
+  fps: 6
+
+wrf:
+  input_interval_seconds: 10800
+  time_step_seconds: 54
+  vertical_levels: 45
+  map_projection: lambert

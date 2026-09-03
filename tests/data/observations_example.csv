@@ -1,0 +1,4 @@
+timestamp,station_id,latitude,longitude,elevation_m,variable,value,unit,quality,source
+2026-08-10T12:00:00+09:00,school,35.6900,139.4100,100,temperature,30.2,degC,valid,school
+2026-08-10T12:10:00+09:00,school,35.6900,139.4100,100,temperature,30.4,degC,valid,school
+2026-08-10T12:00:00+09:00,amedas_example,35.7000,139.4000,80,temperature,29.8,degC,valid,amedas

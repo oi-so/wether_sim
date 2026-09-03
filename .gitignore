@@ -1,0 +1,25 @@
+.DS_Store
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Large meteorological inputs and WRF/WPS products
+data/meteorological/**
+!data/meteorological/.gitkeep
+data/geographic/**
+!data/geographic/.gitkeep
+wrf/
+met_em*
+wrfinput*
+wrfbdy*
+wrfout*
+rsl.out.*
+rsl.error.*
+
+# Generated output
+output/**
+!output/.gitkeep
+*.mp4
+*.gif
