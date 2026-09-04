@@ -16,6 +16,13 @@ from weather_sim.analysis.comparison import align_and_evaluate, station_temperat
 from weather_sim.analysis.observation_verification import evaluate_real_observations
 from weather_sim.analysis.spatial import extract_nearest_series
 from weather_sim.analysis.wrf import open_wrfout
+from weather_sim.case_operations import (
+    animate_case,
+    cleanup_candidates,
+    cleanup_case,
+    evaluate_case,
+    prepare_case_observations,
+)
 from weather_sim.config import load_config
 from weather_sim.errors import WeatherSimError
 from weather_sim.observations.csv_reader import convert_temperature_to_celsius, read_observations
@@ -69,6 +76,59 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--processes", type=int, default=4, help="MPI process count for wrf.exe")
     run.add_argument("--download-only", action="store_true", help="download inputs without running WPS/WRF")
     run.add_argument("--no-animation", action="store_true", help="run WRF without exporting an animation")
+
+    animate = subparsers.add_parser(
+        "animate-case",
+        help="create any missing Japanese/JST animations for an existing case",
+    )
+    animate.add_argument("case_directory", type=Path)
+    animate.add_argument("--force", action="store_true", help="overwrite animations that already exist")
+    animate.add_argument("--format", choices=("mp4", "gif"), dest="animation_format")
+    animate.add_argument("--fps", type=int)
+
+    prepare = subparsers.add_parser(
+        "prepare-observations",
+        help="convert school logs and merge case AMeDAS into the canonical observation CSV",
+    )
+    prepare.add_argument("case_directory", type=Path)
+    prepare.add_argument("--school-dir", type=Path)
+    prepare.add_argument("--school-elevation-m", type=float)
+    prepare.add_argument("--output", type=Path)
+    prepare.add_argument(
+        "--no-download-amedas",
+        action="store_true",
+        help="do not download missing date-matched Fuchu AMeDAS observations",
+    )
+
+    case_evaluate = subparsers.add_parser(
+        "evaluate-case",
+        help="evaluate a completed case against its canonical real-observation CSV",
+    )
+    case_evaluate.add_argument("case_directory", type=Path)
+    case_evaluate.add_argument("--observations", type=Path)
+    case_evaluate.add_argument("--output-dir", type=Path)
+    case_evaluate.add_argument("--tolerance-minutes", type=float)
+
+    cleanup = subparsers.add_parser(
+        "cleanup-case",
+        help="show or delete case-local data that is no longer needed",
+    )
+    cleanup.add_argument("case_directory", type=Path)
+    cleanup.add_argument(
+        "--discard-resimulation",
+        action="store_true",
+        help="remove WPS/WRF intermediate data after deciding not to rerun the simulation",
+    )
+    cleanup.add_argument(
+        "--discard-reevaluation",
+        action="store_true",
+        help="also remove d03 wrfout after deciding not to reevaluate or recreate videos",
+    )
+    cleanup.add_argument(
+        "--execute",
+        action="store_true",
+        help="perform deletion; without this option only the deletion plan is printed",
+    )
     return parser
 
 
@@ -261,6 +321,70 @@ def _run_case(args: argparse.Namespace) -> int:
     return 0
 
 
+def _animate_case(args: argparse.Namespace) -> int:
+    if args.fps is not None and args.fps <= 0:
+        raise ValueError("fps must be positive")
+    project_root = Path(__file__).resolve().parents[2]
+    created = animate_case(
+        args.case_directory,
+        project_root,
+        force=args.force,
+        suffix=args.animation_format,
+        fps=args.fps,
+    )
+    if created:
+        for name, path in created.items():
+            print(f"created {name}: {path.resolve()}")
+    else:
+        print("all available animations already exist; nothing was changed")
+    return 0
+
+
+def _prepare_observations(args: argparse.Namespace) -> int:
+    project_root = Path(__file__).resolve().parents[2]
+    output = prepare_case_observations(
+        args.case_directory,
+        project_root,
+        school_directory=args.school_dir,
+        school_elevation_m=args.school_elevation_m,
+        output_path=args.output,
+        download_amedas=not args.no_download_amedas,
+    )
+    rows = len(pd.read_csv(output))
+    print(f"wrote {rows} canonical observation rows: {output.resolve()}")
+    return 0
+
+
+def _evaluate_case(args: argparse.Namespace) -> int:
+    if args.tolerance_minutes is not None and args.tolerance_minutes < 0:
+        raise ValueError("tolerance-minutes must be non-negative")
+    summary = evaluate_case(
+        args.case_directory,
+        observations_path=args.observations,
+        output_directory=args.output_dir,
+        tolerance_minutes=args.tolerance_minutes,
+    )
+    if summary.empty:
+        raise WeatherSimError("no comparable model/observation pairs were found in the case period")
+    print(summary.to_json(orient="records", force_ascii=False, indent=2))
+    return 0
+
+
+def _cleanup_case(args: argparse.Namespace) -> int:
+    items = cleanup_candidates(
+        args.case_directory,
+        discard_resimulation=args.discard_resimulation,
+        discard_reevaluation=args.discard_reevaluation,
+    )
+    total = cleanup_case(items, execute=args.execute)
+    gib = total / 1024**3
+    verb = "deleted" if args.execute else "would delete"
+    print(f"{verb} {len(items)} paths ({gib:.2f} GiB)")
+    if not args.execute:
+        print("dry-run only; add --execute to perform the deletion")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -275,6 +399,14 @@ def main(argv: list[str] | None = None) -> int:
             return _evaluate_observations(args)
         if args.command == "run-case":
             return _run_case(args)
+        if args.command == "animate-case":
+            return _animate_case(args)
+        if args.command == "prepare-observations":
+            return _prepare_observations(args)
+        if args.command == "evaluate-case":
+            return _evaluate_case(args)
+        if args.command == "cleanup-case":
+            return _cleanup_case(args)
     except (WeatherSimError, ValueError, KeyError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

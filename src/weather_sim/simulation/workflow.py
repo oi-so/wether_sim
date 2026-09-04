@@ -281,6 +281,10 @@ def run_case(
         "simulation_end_utc": config.simulation_end_utc.isoformat(),
         "center": {"latitude": config.center.latitude, "longitude": config.center.longitude},
         "mpi_processes": processes,
+        "analysis_radius_km": config.analysis.radius_km,
+        "output_interval_minutes": config.analysis.output_interval_minutes,
+        "animation_format": config.visualization.animation_format,
+        "animation_fps": config.visualization.fps,
     }
     (case_directory / "case.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",

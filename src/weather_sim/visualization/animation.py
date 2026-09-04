@@ -178,6 +178,7 @@ def create_standard_animations(
     fps: int = 6,
     basemap_cache: str | Path | None = None,
     center: tuple[float, float] | None = None,
+    skip_existing: bool = False,
 ) -> dict[str, Path]:
     """Create all standard surface animations available in a wrfout."""
     output = Path(output_directory)
@@ -193,10 +194,13 @@ def create_standard_animations(
     for name, variable, label, title, cmap, limits, zero_based, vectors in specifications:
         if variable not in dataset:
             continue
+        target = output / f"{name}_animation.{suffix}"
+        if skip_existing and target.is_file() and target.stat().st_size > 0:
+            continue
         created[name] = create_field_animation(
             dataset,
             variable,
-            output / f"{name}_animation.{suffix}",
+            target,
             label=label,
             title=title,
             cmap=cmap,

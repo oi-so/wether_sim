@@ -7,6 +7,14 @@ import xarray as xr
 from weather_sim.cli import main
 
 
+def test_case_entrypoints_have_help() -> None:
+    for command in ("animate-case", "prepare-observations", "evaluate-case", "cleanup-case"):
+        try:
+            main([command, "--help"])
+        except SystemExit as exc:
+            assert exc.code == 0
+
+
 def test_analyze_command_writes_verification_products(tmp_path) -> None:
     config = tmp_path / "config.yaml"
     config.write_text(
