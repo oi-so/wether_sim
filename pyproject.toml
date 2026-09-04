@@ -5,6 +5,7 @@ description = "WRF-based local weather simulation and observation verification t
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "certifi>=2024.8.30",
   "matplotlib>=3.9",
   "netcdf4>=1.7",
   "numpy>=2.0,<2.5",

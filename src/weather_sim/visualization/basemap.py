@@ -10,6 +10,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from weather_sim.network import open_trusted_url
+
 GSI_TILE_URL = "https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png"
 
 
@@ -43,7 +45,7 @@ def _tile_image(cache: Path, zoom: int, x: int, y: int) -> Image.Image:
     url = GSI_TILE_URL.format(z=zoom, x=x, y=y)
     request = urllib.request.Request(url, headers={"User-Agent": "weather-sim/0.1 (research visualization)"})
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with open_trusted_url(request, timeout=30) as response:
             content = response.read()
     except (OSError, urllib.error.URLError) as exc:
         raise RuntimeError(f"地理院タイルを取得できませんでした: {url}: {exc}") from exc

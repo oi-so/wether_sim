@@ -14,6 +14,7 @@ from pathlib import Path
 
 from weather_sim.config.models import ExperimentConfig
 from weather_sim.errors import ExternalCommandError
+from weather_sim.network import open_trusted_url
 
 RISH_ROOT = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 GFS_ROOT = "https://noaa-gfs-bdp-pds.s3.amazonaws.com"
@@ -52,11 +53,31 @@ def _download(url: str, target: Path) -> Path:
     temporary = target.with_suffix(target.suffix + ".part")
     request = urllib.request.Request(url, headers={"User-Agent": "weather-sim/0.1"})
     try:
-        with urllib.request.urlopen(request, timeout=120) as response, temporary.open("wb") as output:
+        with open_trusted_url(request, timeout=120) as response, temporary.open("wb") as output:
             shutil.copyfileobj(response, output, length=1024 * 1024)
     except (OSError, urllib.error.URLError) as exc:
+        # Some archives do not send the intermediate certificate needed by
+        # OpenSSL-based Python builds on macOS. Apple's curl uses the system
+        # trust store and still performs full TLS certificate verification.
         temporary.unlink(missing_ok=True)
-        raise ExternalCommandError(f"download failed: {url}: {exc}") from exc
+        command = [
+            "curl",
+            "--fail",
+            "--location",
+            "--silent",
+            "--show-error",
+            "--retry",
+            "4",
+            "--retry-all-errors",
+            "--output",
+            str(temporary),
+            url,
+        ]
+        result = subprocess.run(command, text=True, capture_output=True, check=False)
+        if result.returncode or not temporary.is_file() or not temporary.stat().st_size:
+            temporary.unlink(missing_ok=True)
+            detail = result.stderr.strip() or str(exc)
+            raise ExternalCommandError(f"download failed: {url}: {detail}") from exc
     temporary.replace(target)
     return target
 
@@ -75,13 +96,28 @@ def _three_hour_times(config: ExperimentConfig) -> tuple[datetime, ...]:
     return tuple(result)
 
 
-def _cycle_assignments(valid_times: tuple[datetime, ...]) -> dict[datetime, datetime]:
-    """Use one MSM/GFS initialization for up to its 15-hour forecast horizon."""
+def _cycle_assignments(
+    valid_times: tuple[datetime, ...],
+    *,
+    cycle_interval_hours: int,
+    max_forecast_hours: int,
+) -> dict[datetime, datetime]:
+    """Assign valid times to supported initialization cycles."""
+    if cycle_interval_hours <= 0 or 24 % cycle_interval_hours:
+        raise ValueError("cycle_interval_hours must be a positive divisor of 24")
+    if max_forecast_hours < 0:
+        raise ValueError("max_forecast_hours must be non-negative")
+
     assignments: dict[datetime, datetime] = {}
     cycle: datetime | None = None
     for valid_time in valid_times:
-        if cycle is None or valid_time - cycle > timedelta(hours=15):
-            cycle = valid_time
+        if cycle is None or valid_time - cycle > timedelta(hours=max_forecast_hours):
+            cycle = valid_time.replace(
+                hour=valid_time.hour - valid_time.hour % cycle_interval_hours,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
         assignments[valid_time] = cycle
     return assignments
 
@@ -151,7 +187,12 @@ def download_msm(
     grib_copy: str = "grib_copy",
     grib_set: str = "grib_set",
 ) -> tuple[Path, ...]:
-    assignments = _cycle_assignments(valid_times)
+    # JMA MSM archives provide 3-hourly cycles with FH00-15 in these files.
+    assignments = _cycle_assignments(
+        valid_times,
+        cycle_interval_hours=3,
+        max_forecast_hours=15,
+    )
     cycle_files: dict[datetime, tuple[Path, Path]] = {}
     for cycle in sorted(set(assignments.values())):
         directory = root / cycle.strftime("%Y-%m-%d")
@@ -199,7 +240,7 @@ def download_msm(
 def _read_url_text(url: str) -> str:
     request = urllib.request.Request(url, headers={"User-Agent": "weather-sim/0.1"})
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with open_trusted_url(request, timeout=60) as response:
             return response.read().decode("utf-8")
     except (OSError, urllib.error.URLError) as exc:
         raise ExternalCommandError(f"download failed: {url}: {exc}") from exc
@@ -242,7 +283,7 @@ def _download_gfs_ranges(url: str, target: Path, ranges: list[tuple[int, int | N
                             url,
                             headers={"User-Agent": "weather-sim/0.1", "Range": range_value},
                         )
-                        with urllib.request.urlopen(request, timeout=120) as response:
+                        with open_trusted_url(request, timeout=120) as response:
                             if response.status != 206:
                                 raise ExternalCommandError(
                                     f"GFS archive did not honor HTTP range {range_value}"
@@ -265,7 +306,13 @@ def _download_gfs_ranges(url: str, target: Path, ranges: list[tuple[int, int | N
 
 
 def download_gfs(valid_times: tuple[datetime, ...], root: Path) -> tuple[Path, ...]:
-    assignments = _cycle_assignments(valid_times)
+    # Operational GFS cycles are 00/06/12/18 UTC. Keep one cycle for a
+    # typical local case to avoid discontinuities between soil forecasts.
+    assignments = _cycle_assignments(
+        valid_times,
+        cycle_interval_hours=6,
+        max_forecast_hours=120,
+    )
     prepared: list[Path] = []
     for valid_time in valid_times:
         cycle = assignments[valid_time]

@@ -13,6 +13,7 @@ import pandas as pd
 
 from weather_sim.config.models import ExperimentConfig
 from weather_sim.errors import ObservationDataError
+from weather_sim.network import open_trusted_url
 from weather_sim.observations.jma_amedas import parse_jma_amedas_10min_html
 
 JMA_TEN_MINUTE_URL = "https://www.data.jma.go.jp/stats/etrn/view/10min_a1.php"
@@ -43,7 +44,7 @@ def download_fuchu_amedas(config: ExperimentConfig, data_root: Path, output_path
         else:
             request = urllib.request.Request(url, headers={"User-Agent": "weather-sim/0.1"})
             try:
-                with urllib.request.urlopen(request, timeout=60) as response:
+                with open_trusted_url(request, timeout=60) as response:
                     html = response.read().decode("utf-8")
             except (OSError, UnicodeDecodeError, urllib.error.URLError) as exc:
                 raise ObservationDataError(f"could not download Fuchu AMeDAS for {day}: {exc}") from exc
