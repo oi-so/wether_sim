@@ -176,6 +176,23 @@ class ExperimentConfig:
     wrf: WRFConfig
     source_path: Path | None = None
 
+    @property
+    def simulation_start_utc(self) -> datetime:
+        """Input-aligned start, padded backward beyond the requested spin-up."""
+        requested = self.time.simulation_start_utc
+        interval = self.wrf.input_interval_seconds
+        timestamp = int(requested.timestamp())
+        return datetime.fromtimestamp(timestamp - timestamp % interval, tz=timezone.utc)
+
+    @property
+    def simulation_end_utc(self) -> datetime:
+        """Input-aligned end, padded forward beyond the requested analysis end."""
+        requested = self.time.target_end_utc
+        interval = self.wrf.input_interval_seconds
+        timestamp = int(requested.timestamp())
+        aligned = timestamp if timestamp % interval == 0 else timestamp + interval - timestamp % interval
+        return datetime.fromtimestamp(aligned, tz=timezone.utc)
+
     @classmethod
     def from_dict(cls, data: dict[str, Any], source_path: Path | None = None) -> "ExperimentConfig":
         center = _section(data, "center")

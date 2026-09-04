@@ -21,7 +21,7 @@ def _values(values: list[object], quote: bool = False) -> str:
 
 
 def _dates(config: ExperimentConfig) -> tuple[datetime, datetime]:
-    return config.time.simulation_start_utc.replace(tzinfo=None), config.time.target_end_utc.replace(tzinfo=None)
+    return config.simulation_start_utc.replace(tzinfo=None), config.simulation_end_utc.replace(tzinfo=None)
 
 
 def _parent_start(parent: DomainConfig, child: DomainConfig) -> tuple[int, int]:
@@ -38,7 +38,13 @@ def _parent_start(parent: DomainConfig, child: DomainConfig) -> tuple[int, int]:
     )
 
 
-def render_namelist_wps(config: ExperimentConfig, geog_data_path: str) -> str:
+def render_namelist_wps(
+    config: ExperimentConfig,
+    geog_data_path: str,
+    *,
+    ungrib_prefix: str = "FILE",
+    metgrid_sources: tuple[str, ...] = ("FILE",),
+) -> str:
     domains = config.domains
     start, end = _dates(config)
     start_text = start.strftime("%Y-%m-%d_%H:%M:%S")
@@ -73,12 +79,12 @@ def render_namelist_wps(config: ExperimentConfig, geog_data_path: str) -> str:
 
 &ungrib
  out_format = 'WPS',
- prefix = 'FILE',
+ prefix = '{ungrib_prefix}',
  ordered_by_date = .false.,
 /
 
 &metgrid
- fg_name = 'FILE',
+ fg_name = {_values(list(metgrid_sources), quote=True)}
  io_form_metgrid = 2,
 /
 """
@@ -180,11 +186,26 @@ def render_namelist_input(config: ExperimentConfig) -> str:
 """
 
 
-def write_namelists(config: ExperimentConfig, output_dir: str | Path, geog_data_path: str) -> tuple[Path, Path]:
+def write_namelists(
+    config: ExperimentConfig,
+    output_dir: str | Path,
+    geog_data_path: str,
+    *,
+    ungrib_prefix: str = "FILE",
+    metgrid_sources: tuple[str, ...] = ("FILE",),
+) -> tuple[Path, Path]:
     target = Path(output_dir)
     target.mkdir(parents=True, exist_ok=True)
     wps_path = target / "namelist.wps"
     input_path = target / "namelist.input"
-    wps_path.write_text(render_namelist_wps(config, geog_data_path), encoding="utf-8")
+    wps_path.write_text(
+        render_namelist_wps(
+            config,
+            geog_data_path,
+            ungrib_prefix=ungrib_prefix,
+            metgrid_sources=metgrid_sources,
+        ),
+        encoding="utf-8",
+    )
     input_path.write_text(render_namelist_input(config), encoding="utf-8")
     return wps_path, input_path

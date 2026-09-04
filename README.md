@@ -183,32 +183,66 @@ Python側では主に以下の利用を想定しています。
 
 実際の依存関係は実装時に `pyproject.toml` で管理します。
 
-## 2026年9月1日ケースを実行する
+## 日付と時刻を指定して実行する
 
 実行場所は、このREADMEがあるプロジェクト直下です。
 
 ```bash
 cd /Users/oiso/programs/wether_sim
-./scripts/run_case_20260901.sh
+./scripts/run_weather_case.sh "2026-09-01 15:00" "2026-09-01 21:00"
 ```
 
-既定では4 MPIプロセスを使います。メモリを抑えたい場合は次のように変更できます。
+開始・終了はJSTとして解釈されます。ISO 8601のUTCオフセットを明示することもできます。
 
 ```bash
-WRF_PROCESSES=2 ./scripts/run_case_20260901.sh
+./scripts/run_weather_case.sh \
+  "2026-09-01T15:00:00+09:00" \
+  "2026-09-01T21:00:00+09:00"
 ```
 
-このケースは学校地点（35.69247912845154, 139.41296806119965）を中心に、2026年9月1日09:00～21:00 JSTを9 km → 3 km → 1 kmの3段ネストで計算します。最初の6時間はspin-up、15:00～21:00 JSTを観測比較の対象にします。入力にはMSMの大気場、GFSの4層土壌・地表面場、WPS地形データを使用します。
+このコマンドは、指定期間とspin-upを覆う入力時刻を計算し、次を自動実行します。
 
-完了後の主な成果物は `output/case_20260901/analysis/` に出力されます。
+1. 京大RISHからMSM気圧面・地表面GRIB2を取得
+2. NOAA GFSからNoah LSM用の地表面・4層土壌場を必要レコードだけ取得
+3. 過去期間では府中アメダス10分値を気象庁から取得
+4. WPS地理データがなければ公式高解像度必須データを取得
+5. `geogrid`、MSM/GFSの`ungrib`、`metgrid`
+6. `real.exe`、9 km → 3 km → 1 kmの`wrf.exe`
+7. 指定した解析期間の気温分布図とMP4/GIF
 
-- `temperature_animation.mp4`: d03の2 m気温アニメーション
-- `temperature_timeseries.png`: 学校観測とWRFの時系列比較
-- `temperature_map.png`: 気温分布図
-- `metrics.json`: Bias・MAE・RMSE
-- `temperature_difference_timeseries.png`: 学校－府中アメダスの気温差比較
+MSM入力は3時間間隔なので、内部の計算期間は指定期間の外側の3時間境界まで自動的に広げられます。解析・アニメーションは指定した開始・終了時刻だけを使用します。
 
-この実行は、観測済みの過去日時を再現するhindcastです。将来予測を行う場合は、対象時刻を未来へ変更し、その時点で利用可能な最新のMSM/GFSを取得する必要があります。
+既定ではspin-up 6時間、4 MPIプロセスです。変更する場合は次のように指定します。
+
+```bash
+./scripts/run_weather_case.sh \
+  "2026-09-01 15:00" "2026-09-01 21:00" \
+  --spinup-hours 9 \
+  --processes 2
+```
+
+データだけを先に取得する場合は `--download-only` を付けます。
+
+```bash
+./scripts/run_weather_case.sh \
+  "2026-09-01 15:00" "2026-09-01 21:00" \
+  --download-only
+```
+
+学校・予測地点は（35.69247912845154, 139.41296806119965）、計算領域は9 km → 3 km → 1 kmの3段ネストです。入力データはローカルにキャッシュされ、同じ日時を再実行した場合は再ダウンロードしません。
+
+完了後の成果物は、開始・終了日時から生成される `output/case_YYYYMMDDTHHMM_YYYYMMDDTHHMM/` に出力されます。
+
+- `analysis/temperature_animation.mp4`: d03の2 m気温
+- `analysis/wind_animation.mp4`: 10 m風速と風ベクトル
+- `analysis/humidity_animation.mp4`: 2 m相対湿度
+- `analysis/precipitation_animation.mp4`: 出力間隔ごとの降水量
+- `analysis/pressure_animation.mp4`: 地表気圧
+- `analysis/skin_temperature_animation.mp4`: 地表面温度
+- `analysis/temperature_map.png`: 気温分布図
+- `observations/amedas_fuchu.csv`: 過去期間で取得できた府中アメダス10分値
+
+過去日時ならhindcast、配信済みの予報時刻ならforecastとして実行できます。ただし、指定時刻のMSM/GFSが配信元に存在しない場合は、曖昧な代替データを使用せずエラーで停止します。本校観測・アメダスとの定量比較は、対応する観測CSVがあるケースに対して従来の `weather-sim analyze` を使用します。
 
 ---
 
@@ -268,7 +302,7 @@ weather-simulation/
 - [ ] OBSGRID / observational nudging / WRFDA等による観測データ同化
 - [ ] 約333 mへの高解像度化
 - [ ] リアルタイム・将来予測
-- [ ] データ取得から解析までの自動化
+- [x] 日時指定、入力データ取得、WPS/WRF、アニメーションの自動化
 - [ ] GUI / Web UI
 
 ---
@@ -298,8 +332,9 @@ Python側のVersion 1基盤として、次を実装済みです。
 - Bias・MAE・RMSE・有効サンプル数Nの計算
 - 気温分布＋風ベクトル、観測/WRF時系列、MP4/GIFアニメーションの出力
 - 上記をまとめて実行するCLI
+- 任意日時からMSM・GFS・アメダス・WPS地理データを準備し、WRFとアニメーションまで実行する `run-case` CLI
 
-WRF/WPS本体、大容量地理データ、初期値・境界値データはGit管理しません。2026-09-01事例では、京都大学生存圏研究所の気象庁GPVアーカイブからMSM気圧面・地表面GRIB2を取得し、WPSの `Vtable.JMAGSM` で5時刻の `met_em*` まで生成済みです。MSMに含まれないNoah LSM用の土壌温度・土壌水分4層は、GFS等の補助データで埋める必要があります。
+WRF/WPS本体、大容量地理データ、初期値・境界値データはGit管理しません。大気場には京都大学生存圏研究所のMSM、MSMに含まれないNoah LSM用の土壌温度・土壌水分4層にはNOAA GFSを使用します。取得済みファイルは `data/` 以下へキャッシュします。
 
 ## セットアップ
 
@@ -351,6 +386,24 @@ uv run weather-sim analyze config/default.yaml \
 
 現段階の地点対応は最近傍格子です。WRF格子と観測点の標高差・土地利用差は自動補正しないため、結果解釈時に必ず確認してください。
 
+## 実観測データによる多変数評価
+
+学校と府中アメダスの実観測について、気温・相対湿度・風速・地表気圧・降水を一括評価できます。
+
+```bash
+uv run weather-sim evaluate-observations \
+  config/case_20260901.yaml \
+  --wrfout "output/case_20260901/wrf_run/wrfout_d03_2026-09-01_00:00:00" \
+  --observations data/observations/case_20260901.csv \
+  --output-dir output/case_20260901/analysis/verification
+```
+
+WRFの各出力時刻に最も近い実観測を1件対応させ、Bias・MAE・RMSE・有効件数Nを計算します。結果は `verification_summary.csv` / `.json`、対応値は `pairs/`、JST時系列グラフは `plots/` に出力します。観測点標高とWRF格子標高も集計表へ残します。
+
+## 地図付きアニメーション
+
+`--animation` で生成する全動画には、国土地理院の標準地図、学校地点、日本語ラベル、JST時刻を表示します。地理院タイルは `data/geographic/gsi_tiles/` にキャッシュされ、動画内に「背景地図：国土地理院」と出典を表示します。
+
 ---
 
 ## 2026-09-01実データ事例
@@ -361,7 +414,7 @@ uv run weather-sim analyze config/default.yaml \
 - 検証アメダス: 府中（block 1133、地点コード44116）
 - d03の学校最近傍格子: `(y=49, x=49)`、地形標高約81.1 m
 - WRF v4.8.0 / WPS v4.7.0: Apple Silicon arm64でビルド・起動確認済み
-- `geogrid`、MSMの `ungrib`、MSM単独の `metgrid`: 完了
-- `real.exe`: MSMの鉛直17層を認識し、Noah LSM用土壌4層不足の位置まで確認
+- `geogrid`、MSM/GFSの `ungrib`、両者を併合した `metgrid`: 完了
+- `real.exe`: 3領域の `wrfinput` と `wrfbdy_d01` の生成成功を確認済み
 
-本校のCP932・1分値WSNログと、気象庁の府中10分値は `scripts/prepare_case_20260901.py` で共通long形式へ変換できます。現在の次工程は、同時刻の補助土壌場を取得して `metgrid` へ併合し、`real.exe`、9 km単独、3 km、1 kmの順に実行することです。
+本校のCP932・1分値WSNログと、気象庁の府中10分値は `scripts/prepare_case_20260901.py` で共通long形式へ変換できます。任意日時の自動ワークフローは追加済みですが、ユーザー指定によりこの変更時点では新ワークフロー自体のテスト実行は行っていません。

@@ -5,17 +5,22 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 from weather_sim.analysis.comparison import align_and_evaluate, station_temperature_difference
+from weather_sim.analysis.observation_verification import evaluate_real_observations
 from weather_sim.analysis.spatial import extract_nearest_series
 from weather_sim.analysis.wrf import open_wrfout
 from weather_sim.config import load_config
 from weather_sim.errors import WeatherSimError
 from weather_sim.observations.csv_reader import convert_temperature_to_celsius, read_observations
 from weather_sim.simulation.namelists import write_namelists
+from weather_sim.simulation.workflow import run_case
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -41,6 +46,29 @@ def _parser() -> argparse.ArgumentParser:
     )
     analyze.add_argument("--output-dir", type=Path, required=True)
     analyze.add_argument("--animation", action="store_true", help="also export the configured MP4/GIF")
+
+    evaluate = subparsers.add_parser(
+        "evaluate-observations",
+        help="evaluate all supported WRF variables against real station observations",
+    )
+    evaluate.add_argument("config", type=Path)
+    evaluate.add_argument("--wrfout", type=Path, required=True)
+    evaluate.add_argument("--observations", type=Path, required=True)
+    evaluate.add_argument("--output-dir", type=Path, required=True)
+
+    run = subparsers.add_parser(
+        "run-case",
+        help="download date-matched MSM/GFS data and run WPS, WRF, and animation",
+    )
+    run.add_argument("--start", required=True, help="analysis start, e.g. 2026-09-01T15:00:00+09:00")
+    run.add_argument("--end", required=True, help="analysis end, e.g. 2026-09-01T21:00:00+09:00")
+    run.add_argument("--timezone", default="Asia/Tokyo", help="timezone for datetimes without an offset")
+    run.add_argument("--spinup-hours", type=float, default=6)
+    run.add_argument("--template", type=Path, default=Path("config/case_20260901.yaml"))
+    run.add_argument("--case-name", help="output directory name; generated from the requested period by default")
+    run.add_argument("--processes", type=int, default=4, help="MPI process count for wrf.exe")
+    run.add_argument("--download-only", action="store_true", help="download inputs without running WPS/WRF")
+    run.add_argument("--no-animation", action="store_true", help="run WRF without exporting an animation")
     return parser
 
 
@@ -48,9 +76,10 @@ def _validate(config_path: Path) -> int:
     config = load_config(config_path)
     summary = {
         "center": [config.center.latitude, config.center.longitude],
-        "simulation_start_utc": config.time.simulation_start_utc.isoformat(),
+        "simulation_start_utc": config.simulation_start_utc.isoformat(),
         "analysis_start_utc": config.time.target_start_utc.isoformat(),
         "analysis_end_utc": config.time.target_end_utc.isoformat(),
+        "simulation_end_utc": config.simulation_end_utc.isoformat(),
         "domains": [
             {"name": domain.name, "dx_m": domain.dx_m, "width_km": domain.width_km, "height_km": domain.height_km}
             for domain in config.domains
@@ -88,7 +117,7 @@ def _model_series(dataset, rows: pd.DataFrame):
 
 
 def _analyze(args: argparse.Namespace) -> int:
-    from weather_sim.visualization.animation import create_temperature_animation
+    from weather_sim.visualization.animation import create_standard_animations
     from weather_sim.visualization.plots import plot_surface_field, plot_timeseries
 
     config = load_config(args.config)
@@ -127,7 +156,22 @@ def _analyze(args: argparse.Namespace) -> int:
         )
         if args.animation:
             suffix = config.visualization.animation_format
-            create_temperature_animation(dataset, output_dir / f"temperature_animation.{suffix}", config.visualization.fps)
+            create_standard_animations(
+                dataset,
+                output_dir,
+                suffix=suffix,
+                fps=config.visualization.fps,
+                basemap_cache=Path(__file__).resolve().parents[2] / "data/geographic/gsi_tiles",
+                center=(config.center.latitude, config.center.longitude),
+            )
+        evaluate_real_observations(
+            dataset,
+            observations,
+            output_dir / "verification",
+            start=start,
+            end=end,
+            tolerance=pd.Timedelta(minutes=config.analysis.output_interval_minutes / 2),
+        )
         if args.reference_station_id:
             reference_rows = _temperature_rows(observations, args.reference_station_id)
             reference_model, _ = _model_series(dataset, reference_rows)
@@ -164,6 +208,59 @@ def _analyze(args: argparse.Namespace) -> int:
     return 0
 
 
+def _evaluate_observations(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    observations = read_observations(args.observations, timezone_name=config.time.timezone_name)
+    dataset = open_wrfout(args.wrfout)
+    try:
+        summary = evaluate_real_observations(
+            dataset,
+            observations,
+            args.output_dir.resolve(),
+            start=pd.Timestamp(config.time.target_start_utc),
+            end=pd.Timestamp(config.time.target_end_utc),
+            tolerance=pd.Timedelta(minutes=config.analysis.output_interval_minutes / 2),
+        )
+        print(summary.to_json(orient="records", force_ascii=False, indent=2))
+    finally:
+        dataset.close()
+    return 0
+
+
+def _cli_datetime(value: str, zone: ZoneInfo) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"invalid ISO 8601 datetime: {value}") from exc
+    return parsed.replace(tzinfo=zone) if parsed.tzinfo is None else parsed
+
+
+def _run_case(args: argparse.Namespace) -> int:
+    zone = ZoneInfo(args.timezone)
+    template = load_config(args.template)
+    configured = replace(
+        template,
+        time=replace(
+            template.time,
+            target_start=_cli_datetime(args.start, zone),
+            target_end=_cli_datetime(args.end, zone),
+            timezone_name=args.timezone,
+            spinup_hours=args.spinup_hours,
+        ),
+        visualization=replace(template.visualization, animation=not args.no_animation),
+    )
+    project_root = Path(__file__).resolve().parents[2]
+    output = run_case(
+        configured,
+        project_root,
+        case_name=args.case_name,
+        processes=args.processes,
+        download_only=args.download_only,
+    )
+    print(output.resolve())
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -174,6 +271,10 @@ def main(argv: list[str] | None = None) -> int:
             return _generate(args.config, args.output_dir, args.geog_data_path)
         if args.command == "analyze":
             return _analyze(args)
+        if args.command == "evaluate-observations":
+            return _evaluate_observations(args)
+        if args.command == "run-case":
+            return _run_case(args)
     except (WeatherSimError, ValueError, KeyError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
