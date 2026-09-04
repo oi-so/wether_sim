@@ -97,6 +97,31 @@ def render_namelist_input(config: ExperimentConfig) -> str:
     run = end - start
     starts = [(1, 1)] + [_parent_start(domains[i - 1], domains[i]) for i in range(1, count)]
     fields = lambda value: _values([value] * count)
+    run_hours = run.total_seconds() / 3600
+    pbl_switch = 0 if config.wrf.grid_nudging_in_pbl else 1
+    fdda = ""
+    if config.wrf.grid_nudging:
+        fdda = f"""
+&fdda
+ grid_fdda = {fields(1)}
+ gfdda_inname = 'wrffdda_d<domain>',
+ gfdda_interval_m = {fields(config.wrf.input_interval_seconds // 60)}
+ gfdda_end_h = {fields(run_hours)}
+ io_form_gfdda = 2,
+ fgdt = {fields(0)}
+ if_no_pbl_nudging_uv = {fields(pbl_switch)}
+ if_no_pbl_nudging_t = {fields(pbl_switch)}
+ if_no_pbl_nudging_q = {fields(pbl_switch)}
+ if_zfac_uv = {fields(0)}
+ if_zfac_t = {fields(0)}
+ if_zfac_q = {fields(0)}
+ guv = {fields(config.wrf.nudging_uv_s)}
+ gt = {fields(config.wrf.nudging_temperature_s)}
+ gq = {fields(config.wrf.nudging_moisture_s)}
+ if_ramping = 0,
+ dtramp_min = 0.0,
+/
+"""
     return f"""&time_control
  run_days = {run.days},
  run_hours = {run.seconds // 3600},
@@ -172,7 +197,7 @@ def render_namelist_input(config: ExperimentConfig) -> str:
  moist_adv_opt = {_values([1] * count)}
  scalar_adv_opt = {_values([1] * count)}
 /
-
+{fdda}
 &bdy_control
  spec_bdy_width = 5,
  specified = {_values([True] + [False] * (count - 1))}

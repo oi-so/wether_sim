@@ -147,6 +147,11 @@ class WRFConfig:
     metgrid_levels: int = 27
     metgrid_soil_levels: int = 4
     top_pressure_pa: int = 5000
+    grid_nudging: bool = False
+    grid_nudging_in_pbl: bool = True
+    nudging_uv_s: float = 0.0003
+    nudging_temperature_s: float = 0.0003
+    nudging_moisture_s: float = 0.00001
 
     def __post_init__(self) -> None:
         if self.input_interval_seconds <= 0:
@@ -161,6 +166,13 @@ class WRFConfig:
             raise ConfigurationError("wrf.metgrid_soil_levels must be non-negative")
         if self.top_pressure_pa <= 0:
             raise ConfigurationError("wrf.top_pressure_pa must be positive")
+        for name, value in (
+            ("nudging_uv_s", self.nudging_uv_s),
+            ("nudging_temperature_s", self.nudging_temperature_s),
+            ("nudging_moisture_s", self.nudging_moisture_s),
+        ):
+            if value < 0:
+                raise ConfigurationError(f"wrf.{name} must be non-negative")
         if self.map_projection not in {"lambert"}:
             raise ConfigurationError("Version 1 currently supports only the Lambert projection")
 
@@ -264,6 +276,11 @@ class ExperimentConfig:
                 metgrid_levels=int(wrf.get("metgrid_levels", 27)),
                 metgrid_soil_levels=int(wrf.get("metgrid_soil_levels", 4)),
                 top_pressure_pa=int(wrf.get("top_pressure_pa", 5000)),
+                grid_nudging=bool(wrf.get("grid_nudging", False)),
+                grid_nudging_in_pbl=bool(wrf.get("grid_nudging_in_pbl", True)),
+                nudging_uv_s=float(wrf.get("nudging_uv_s", 0.0003)),
+                nudging_temperature_s=float(wrf.get("nudging_temperature_s", 0.0003)),
+                nudging_moisture_s=float(wrf.get("nudging_moisture_s", 0.00001)),
             ),
             source_path=source_path,
         )

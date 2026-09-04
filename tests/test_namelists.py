@@ -25,3 +25,12 @@ def test_msm_case_declares_input_vertical_dimensions() -> None:
     assert "num_metgrid_levels = 17," in text
     assert "num_metgrid_soil_levels = 4," in text
     assert "p_top_requested = 10000," in text
+
+
+def test_fdda_case_enables_three_hourly_grid_nudging() -> None:
+    text = render_namelist_input(load_config("config/case_20260904_fdda.yaml"))
+    assert "&fdda" in text
+    assert "grid_fdda = 1, 1, 1," in text
+    assert "gfdda_interval_m = 180, 180, 180," in text
+    assert "if_no_pbl_nudging_t = 0, 0, 0," in text
+    assert "gt = 0.0003, 0.0003, 0.0003," in text
