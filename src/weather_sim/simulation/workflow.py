@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
+import xarray as xr
 
 from weather_sim.analysis.wrf import open_wrfout
 from weather_sim.config.models import ExperimentConfig
@@ -104,8 +105,18 @@ def _prepare_wps(
         str(data.geographic_directory),
         metgrid_sources=("MSM", "GFS"),
     )
-    _replace_symlink(directory / "GEOGRID.TBL", wps_root / "geogrid/GEOGRID.TBL.ARW")
-    _replace_symlink(directory / "METGRID.TBL", wps_root / "metgrid/METGRID.TBL.ARW")
+    # WPS resolves these tables below its default ``geogrid/`` and
+    # ``metgrid/`` paths.  A link in the case root is not sufficient.
+    (directory / "geogrid").mkdir(exist_ok=True)
+    (directory / "metgrid").mkdir(exist_ok=True)
+    _replace_symlink(
+        directory / "geogrid/GEOGRID.TBL",
+        wps_root / "geogrid/GEOGRID.TBL.ARW",
+    )
+    _replace_symlink(
+        directory / "metgrid/METGRID.TBL",
+        wps_root / "metgrid/METGRID.TBL.ARW",
+    )
     _run([str(wps_bin / "geogrid")], directory, "geogrid.stdout.log", {"OMPI_MCA_btl": "self,vader"})
 
     msm = _prepare_ungrib(
@@ -131,7 +142,72 @@ def _prepare_wps(
             name = f"{prefix}:{valid_time:%Y-%m-%d_%H}"
             _replace_symlink(directory / name, source_directory / name)
     _run([str(wps_bin / "metgrid")], directory, "metgrid.stdout.log", {"OMPI_MCA_btl": "self,vader"})
+    _validate_metgrid_inputs(directory, config)
     return directory
+
+
+def _validate_metgrid_inputs(
+    wps_directory: Path,
+    config: ExperimentConfig,
+) -> None:
+    """Reject corrupt land/surface initialization before an expensive WRF run.
+
+    WRF soil temperatures are Kelvin. Values outside this broad physical
+    range indicate a failed GRIB bitmap/interpolation conversion, not a
+    plausible weather event. The MSM near-surface temperature and humidity
+    are also required so ``real.exe`` does not fall back to a pressure level.
+    Ocean points are excluded because GFS soil fields are intentionally
+    missing there.
+    """
+    first_time = config.simulation_start_utc.replace(tzinfo=None)
+    inner_domain = len(config.domains)
+    met_em = wps_directory / f"met_em.d{inner_domain:02d}.{first_time:%Y-%m-%d_%H:%M:%S}.nc"
+    if not met_em.is_file():
+        raise ExternalCommandError(f"metgrid did not create expected inner-domain input: {met_em}")
+
+    try:
+        dataset = xr.open_dataset(met_em, decode_times=False)
+    except (OSError, ValueError) as exc:
+        raise ExternalCommandError(f"could not inspect metgrid output {met_em}: {exc}") from exc
+    try:
+        required = {"ST", "LANDSEA", "TT", "RH"}
+        missing = sorted(required.difference(dataset.variables))
+        if missing:
+            raise ExternalCommandError(
+                f"metgrid output is missing required soil fields: {', '.join(missing)}"
+            )
+        land = dataset["LANDSEA"] > 0.5
+        soil = dataset["ST"].where(land)
+        minimum = float(soil.min(skipna=True))
+        maximum = float(soil.max(skipna=True))
+        if not 180.0 <= minimum <= maximum <= 350.0:
+            raise ExternalCommandError(
+                "invalid metgrid land soil temperature: "
+                f"range={minimum:.2f}..{maximum:.2f} K in {met_em}; "
+                "do not run WRF with corrupt surface initialization"
+            )
+        surface_temperature = dataset["TT"].isel(num_metgrid_levels=0).where(land)
+        surface_humidity = dataset["RH"].isel(num_metgrid_levels=0).where(land)
+        temperature_range = (
+            float(surface_temperature.min(skipna=True)),
+            float(surface_temperature.max(skipna=True)),
+        )
+        humidity_range = (
+            float(surface_humidity.min(skipna=True)),
+            float(surface_humidity.max(skipna=True)),
+        )
+        if not 180.0 <= temperature_range[0] <= temperature_range[1] <= 350.0:
+            raise ExternalCommandError(
+                "invalid or missing metgrid near-surface air temperature: "
+                f"range={temperature_range[0]:.2f}..{temperature_range[1]:.2f} K in {met_em}"
+            )
+        if not 0.0 <= humidity_range[0] <= humidity_range[1] <= 100.0:
+            raise ExternalCommandError(
+                "invalid or missing metgrid near-surface relative humidity: "
+                f"range={humidity_range[0]:.2f}..{humidity_range[1]:.2f} % in {met_em}"
+            )
+    finally:
+        dataset.close()
 
 
 def _prepare_wrf_run(config: ExperimentConfig, project_root: Path, case_directory: Path, wps: Path) -> Path:

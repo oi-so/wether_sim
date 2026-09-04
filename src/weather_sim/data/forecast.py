@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import tarfile
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -93,7 +94,63 @@ def _msm_names(cycle: datetime) -> tuple[str, str]:
     )
 
 
-def download_msm(valid_times: tuple[datetime, ...], root: Path, grib_copy: str = "grib_copy") -> tuple[Path, ...]:
+def _normalize_msm_near_surface_levels(
+    source: Path,
+    target: Path,
+    *,
+    grib_set: str,
+) -> None:
+    """Expose JMA's 1.5 m temperature/RH to WPS as its 2 m surface level.
+
+    MSM encodes these fields at 1.5 m using a scaled GRIB2 fixed-surface
+    value. WPS 4.7 ignores that scale and only accepts a raw level of 2 m,
+    otherwise ``real.exe`` silently falls back to the lowest pressure level.
+    """
+    temperature_adjusted = target.with_suffix(target.suffix + ".temperature.part")
+    final_part = target.with_suffix(target.suffix + ".part")
+    temperature_adjusted.unlink(missing_ok=True)
+    final_part.unlink(missing_ok=True)
+    commands = (
+        [
+            grib_set,
+            "-w",
+            "shortName=t,typeOfLevel=heightAboveGround",
+            "-s",
+            "scaleFactorOfFirstFixedSurface=0,scaledValueOfFirstFixedSurface=2",
+            str(source),
+            str(temperature_adjusted),
+        ],
+        [
+            grib_set,
+            "-w",
+            "shortName=r,typeOfLevel=heightAboveGround",
+            "-s",
+            "scaleFactorOfFirstFixedSurface=0,scaledValueOfFirstFixedSurface=2",
+            str(temperature_adjusted),
+            str(final_part),
+        ],
+    )
+    try:
+        for command in commands:
+            result = subprocess.run(command, text=True, capture_output=True, check=False)
+            if result.returncode:
+                raise ExternalCommandError(
+                    f"failed to normalize MSM near-surface level: {result.stderr.strip()}"
+                )
+        if not final_part.is_file() or not final_part.stat().st_size:
+            raise ExternalCommandError("MSM near-surface normalization created no data")
+        final_part.replace(target)
+    finally:
+        temperature_adjusted.unlink(missing_ok=True)
+        final_part.unlink(missing_ok=True)
+
+
+def download_msm(
+    valid_times: tuple[datetime, ...],
+    root: Path,
+    grib_copy: str = "grib_copy",
+    grib_set: str = "grib_set",
+) -> tuple[Path, ...]:
     assignments = _cycle_assignments(valid_times)
     cycle_files: dict[datetime, tuple[Path, Path]] = {}
     for cycle in sorted(set(assignments.values())):
@@ -112,23 +169,29 @@ def download_msm(valid_times: tuple[datetime, ...], root: Path, grib_copy: str =
             root
             / valid_time.strftime("%Y-%m-%d")
             / "wps_steps"
-            / f"msm_{valid_time:%Y%m%d_%H%M}_from_{cycle:%Y%m%d_%H%M}.grib2"
+            / f"msm_{valid_time:%Y%m%d_%H%M}_from_{cycle:%Y%m%d_%H%M}_wps2m.grib2"
         )
         if target.is_file() and target.stat().st_size:
             prepared.append(target)
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
+        extracted = target.with_suffix(target.suffix + ".extracted.part")
+        extracted.unlink(missing_ok=True)
         command = [
             grib_copy,
             "-w",
             f"validityDate={valid_time:%Y%m%d},validityTime={int(valid_time.strftime('%H%M'))}",
             *(str(path) for path in cycle_files[cycle]),
-            str(target),
+            str(extracted),
         ]
         result = subprocess.run(command, text=True, capture_output=True, check=False)
-        if result.returncode or not target.is_file() or not target.stat().st_size:
-            target.unlink(missing_ok=True)
+        if result.returncode or not extracted.is_file() or not extracted.stat().st_size:
+            extracted.unlink(missing_ok=True)
             raise ExternalCommandError(f"failed to extract MSM valid time {valid_time.isoformat()}: {result.stderr.strip()}")
+        try:
+            _normalize_msm_near_surface_levels(extracted, target, grib_set=grib_set)
+        finally:
+            extracted.unlink(missing_ok=True)
         prepared.append(target)
     return tuple(prepared)
 
@@ -172,13 +235,26 @@ def _download_gfs_ranges(url: str, target: Path, ranges: list[tuple[int, int | N
         with temporary.open("wb") as output:
             for start, end in ranges:
                 range_value = f"bytes={start}-{'' if end is None else end}"
-                request = urllib.request.Request(
-                    url, headers={"User-Agent": "weather-sim/0.1", "Range": range_value}
-                )
-                with urllib.request.urlopen(request, timeout=120) as response:
-                    if response.status != 206:
-                        raise ExternalCommandError(f"GFS archive did not honor HTTP range {range_value}")
-                    shutil.copyfileobj(response, output, length=1024 * 1024)
+                output_position = output.tell()
+                for attempt in range(4):
+                    try:
+                        request = urllib.request.Request(
+                            url,
+                            headers={"User-Agent": "weather-sim/0.1", "Range": range_value},
+                        )
+                        with urllib.request.urlopen(request, timeout=120) as response:
+                            if response.status != 206:
+                                raise ExternalCommandError(
+                                    f"GFS archive did not honor HTTP range {range_value}"
+                                )
+                            shutil.copyfileobj(response, output, length=1024 * 1024)
+                        break
+                    except (OSError, urllib.error.URLError, ExternalCommandError):
+                        output.seek(output_position)
+                        output.truncate()
+                        if attempt == 3:
+                            raise
+                        time.sleep(2**attempt)
     except (OSError, urllib.error.URLError, ExternalCommandError) as exc:
         temporary.unlink(missing_ok=True)
         if isinstance(exc, ExternalCommandError):
