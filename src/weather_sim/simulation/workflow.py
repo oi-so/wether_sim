@@ -21,6 +21,7 @@ from weather_sim.simulation.namelists import write_namelists
 from weather_sim.simulation.runtime_cache import cache_thompson_tables, restore_thompson_tables
 from weather_sim.visualization.animation import create_standard_animations
 from weather_sim.visualization.plots import plot_surface_field
+from weather_sim.visualization.volume import create_volume_animation
 
 
 def default_case_name(config: ExperimentConfig) -> str:
@@ -252,6 +253,10 @@ def _visualize(config: ExperimentConfig, run_directory: Path, case_directory: Pa
             radius_km=config.analysis.radius_km,
         )
         if config.visualization.animation:
+            create_volume_animation(
+                analysis, output / 'atmosphere_3d.html',
+                center=(config.center.latitude, config.center.longitude), radius_km=config.analysis.radius_km,
+            )
             create_standard_animations(
                 analysis,
                 output,

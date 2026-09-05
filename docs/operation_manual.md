@@ -181,6 +181,8 @@ timestamp,station_id,latitude,longitude,elevation_m,variable,value,unit,quality,
 
 ## 7. コマンド一覧を確認する
 
+雲の2D動画6種類と、地形付き3Dアニメーションを追加しました。`animate-case` は両方の不足分を作成します。詳しい操作は [3D・雲動画マニュアル](animation_3d.md) を参照してください。
+
 ```bash
 uv run weather-sim --help
 uv run weather-sim animate-case --help

@@ -1,5 +1,7 @@
 # Local Weather Simulation
 
+地形付き3Dアニメーションと雲の2D動画6種類を追加しました。既存結果へ `./scripts/animate_weather_case.sh output/old` を実行すると不足分だけ生成します。操作と気象量の定義は [3D・雲動画マニュアル](docs/animation_3d.md) を参照してください。
+
 2026-09-05更新：`run-case` の既定設定は `config/msm_guided.yaml`（MSMナッジング、親領域60分出力）です。精度は検証中です。従来条件との比較は `--template config/case_20260901.yaml` を指定できます。完走結果と速度の確認は [追加評価](docs/evaluation_20260905_followup.md) を参照してください。
 
 指定した地点周辺の局地気象を、WRF（Weather Research and Forecasting Model）を用いて高解像度で再現・予測するためのプロジェクトです。

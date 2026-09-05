@@ -28,6 +28,7 @@ from weather_sim.errors import WeatherSimError
 from weather_sim.observations.csv_reader import convert_temperature_to_celsius, read_observations
 from weather_sim.simulation.namelists import write_namelists
 from weather_sim.simulation.workflow import run_case
+from weather_sim.visualization.volume import VolumeOptions
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -86,6 +87,11 @@ def _parser() -> argparse.ArgumentParser:
     animate.add_argument("--force", action="store_true", help="overwrite animations that already exist")
     animate.add_argument("--format", choices=("mp4", "gif"), dest="animation_format")
     animate.add_argument("--fps", type=int)
+    animate.add_argument('--dimension', choices=('2d', '3d', 'both'), default='both')
+    animate.add_argument('--horizontal-stride', type=int, default=3, help='3D horizontal display sampling')
+    animate.add_argument('--vertical-stride', type=int, default=2, help='3D vertical display sampling')
+    animate.add_argument('--time-stride', type=int, default=1, help='3D frame sampling')
+    animate.add_argument('--max-height-km', type=float, default=15., help='3D upper display height MSL')
 
     prepare = subparsers.add_parser(
         "prepare-observations",
@@ -332,6 +338,8 @@ def _animate_case(args: argparse.Namespace) -> int:
         force=args.force,
         suffix=args.animation_format,
         fps=args.fps,
+        dimension=args.dimension,
+        volume_options=VolumeOptions(args.horizontal_stride, args.vertical_stride, args.time_stride, args.max_height_km),
     )
     if created:
         for name, path in created.items():

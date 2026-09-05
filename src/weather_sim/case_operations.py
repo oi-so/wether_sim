@@ -19,6 +19,7 @@ from weather_sim.observations.jma_download import download_fuchu_amedas_period
 from weather_sim.observations.school_wsn import read_school_wsn
 from weather_sim.visualization.animation import create_standard_animations
 from weather_sim.visualization.plots import plot_surface_field
+from weather_sim.visualization.volume import VolumeOptions, create_volume_animation
 
 
 CANONICAL_COLUMNS = (
@@ -94,9 +95,13 @@ def animate_case(
     force: bool = False,
     suffix: str | None = None,
     fps: int | None = None,
+    dimension: str = 'both',
+    volume_options: VolumeOptions | None = None,
 ) -> dict[str, Path]:
     """Create only missing standard animations unless ``force`` is requested."""
     case = load_case(case_directory)
+    if dimension not in {'2d', '3d', 'both'}:
+        raise ValueError('dimension must be 2d, 3d, or both')
     extension = suffix or str(case.manifest.get("animation_format", "mp4"))
     frame_rate = fps or int(case.manifest.get("animation_fps", 6))
     dataset, analysis = _target_dataset(case)
@@ -105,6 +110,15 @@ def animate_case(
         output.mkdir(parents=True, exist_ok=True)
         map_path = output / "temperature_map.png"
         created: dict[str, Path] = {}
+        if dimension in {'3d', 'both'}:
+            target = output / 'atmosphere_3d.html'
+            if force or not target.is_file() or target.stat().st_size == 0:
+                created['atmosphere_3d'] = create_volume_animation(
+                    analysis, target, center=(case.latitude, case.longitude),
+                    radius_km=float(case.manifest.get('analysis_radius_km', 20)), options=volume_options,
+                )
+        if dimension == '3d':
+            return created
         if force or not map_path.is_file():
             plot_surface_field(
                 analysis,

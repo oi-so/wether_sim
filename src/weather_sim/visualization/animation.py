@@ -14,6 +14,7 @@ import pandas as pd
 import xarray as xr
 
 from weather_sim.visualization.basemap import add_gsi_basemap
+from weather_sim.analysis.atmosphere import CLOUD_REQUIRED, cloud_columns
 
 matplotlib.rcParams["font.family"] = ["Hiragino Sans", "DejaVu Sans"]
 matplotlib.rcParams["axes.unicode_minus"] = False
@@ -182,6 +183,14 @@ def create_standard_animations(
 ) -> dict[str, Path]:
     """Create all standard surface animations available in a wrfout."""
     output = Path(output_directory)
+    cloud_names = ('cloud_total', 'cloud_low', 'cloud_mid', 'cloud_high', 'cloud_water_path', 'cloud_ice_path')
+    cloud_pending = any(
+        not (output / f'{name}_animation.{suffix}').is_file()
+        or (output / f'{name}_animation.{suffix}').stat().st_size == 0
+        for name in cloud_names
+    )
+    if CLOUD_REQUIRED.issubset(dataset.variables) and (not skip_existing or cloud_pending):
+        dataset = dataset.assign(cloud_columns(dataset))
     specifications = (
         ("temperature", "temperature_2m_c", "高度2 m 気温（°C）", "高度2 m 気温", "turbo", None, False, False),
         ("wind", "wind_speed_10m_ms", "高度10 m 風速（m/s）", "高度10 m 風向・風速", "viridis", None, True, True),
@@ -189,6 +198,12 @@ def create_standard_animations(
         ("precipitation", "precipitation_interval_mm", "時間降水量（mm/出力間隔）", "時間降水量", "Blues", None, True, False),
         ("pressure", "surface_pressure_hpa", "地表気圧（hPa）", "地表気圧", "coolwarm", None, False, False),
         ("skin_temperature", "skin_temperature_c", "地表面温度（°C）", "地表面温度", "inferno", None, False, False),
+        ('cloud_total', 'cloud_total', '総雲量（%）', '総雲量・最大ランダム重なり', 'Blues', (0., 100.), False, False),
+        ('cloud_low', 'cloud_low', '下層雲量（%）', '下層雲量・地上300〜2000 m', 'Blues', (0., 100.), False, False),
+        ('cloud_mid', 'cloud_mid', '中層雲量（%）', '中層雲量・地上2000〜6000 m', 'Blues', (0., 100.), False, False),
+        ('cloud_high', 'cloud_high', '上層雲量（%）', '上層雲量・地上6000 m以上', 'Blues', (0., 100.), False, False),
+        ('cloud_water_path', 'cloud_water_path', '雲水鉛直積算量（kg/m²）', '雲水鉛直積算量（雨水を除く）', 'YlGnBu', None, True, False),
+        ('cloud_ice_path', 'cloud_ice_path', '雲氷鉛直積算量（kg/m²）', '雲氷鉛直積算量（雪・霰を除く）', 'PuBu', None, True, False),
     )
     created: dict[str, Path] = {}
     for name, variable, label, title, cmap, limits, zero_based, vectors in specifications:
