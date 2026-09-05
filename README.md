@@ -1,5 +1,7 @@
 # Local Weather Simulation
 
+2026-09-05更新：`run-case` の既定設定は `config/msm_guided.yaml`（MSMナッジング、親領域60分出力）です。精度は検証中です。従来条件との比較は `--template config/case_20260901.yaml` を指定できます。完走結果と速度の確認は [追加評価](docs/evaluation_20260905_followup.md) を参照してください。
+
 指定した地点周辺の局地気象を、WRF（Weather Research and Forecasting Model）を用いて高解像度で再現・予測するためのプロジェクトです。
 
 主な解析対象は、指定地点を中心とした**半径約20 km**です。対象範囲だけを単独で計算するのではなく、外側の大気の影響を取り込むため、複数の計算領域をネスティングします。

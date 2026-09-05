@@ -39,3 +39,20 @@ def test_open_wrfout_derives_temperature_wind_and_precipitation(tmp_path) -> Non
         assert opened["precipitation_interval_mm"].isel(Time=1, south_north=0, west_east=0).item() == 2.0
     finally:
         opened.close()
+    with open_wrfout(path, points=[(36.0, 140.0)]) as cropped:
+        assert cropped.sizes["south_north"] == cropped.sizes["west_east"] == 1
+        assert cropped.attrs["grid_y_offset"] == cropped.attrs["grid_x_offset"] == 1
+        assert np.isnan(cropped["precipitation_interval_mm"].isel(Time=0)).all()
+        assert cropped["precipitation_interval_hours"].isel(Time=1).item() == pytest.approx(1 / 6)
+        assert cropped["temperature_2m_c"].isel(Time=1).item() == 20
+
+    dataset["RAINNC"][1] = -2.0
+    dataset.to_netcdf(path)
+    with open_wrfout(path) as reset:
+        assert np.isnan(reset["precipitation_interval_mm"].isel(Time=1)).all()
+
+    dataset["Times"][1] = dataset["Times"][0]
+    dataset.to_netcdf(path)
+    from weather_sim.errors import WRFOutputError
+    with pytest.raises(WRFOutputError, match="unique"):
+        open_wrfout(path)

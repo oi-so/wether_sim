@@ -71,7 +71,8 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--end", required=True, help="analysis end, e.g. 2026-09-01T21:00:00+09:00")
     run.add_argument("--timezone", default="Asia/Tokyo", help="timezone for datetimes without an offset")
     run.add_argument("--spinup-hours", type=float, default=6)
-    run.add_argument("--template", type=Path, default=Path("config/case_20260901.yaml"))
+    run.add_argument("--template", type=Path, default=Path("config/msm_guided.yaml"),
+                     help="experiment template (default: MSM nudging and reduced parent output; accuracy under validation)")
     run.add_argument("--case-name", help="output directory name; generated from the requested period by default")
     run.add_argument("--processes", type=int, default=4, help="MPI process count for wrf.exe")
     run.add_argument("--download-only", action="store_true", help="download inputs without running WPS/WRF")

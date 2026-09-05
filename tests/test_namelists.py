@@ -44,7 +44,7 @@ def test_efficient_case_preserves_boundary_bracket_and_inner_output() -> None:
     assert "end_hour = 12, 12, 12," in wrf  # real.exe still prepares 21 JST input
     assert "2026-09-04_12:00:00" in wps
     assert "history_interval = 60, 60, 10," in wrf
-    assert "gfdda_end_h = 14.0, 14.0, 14.0," in wrf
+    assert "gfdda_end_h = 15, 15, 15," in wrf
     assert "grid_fdda = 1, 1, 1," in wrf
 
 
@@ -54,3 +54,12 @@ def test_runtime_keeps_seconds_at_unaligned_end() -> None:
     config = load_config("config/case_20260904.yaml")
     config = replace(config, time=replace(config.time, target_end=config.time.target_end + timedelta(seconds=35)))
     assert "run_seconds = 35," in render_namelist_input(config)
+
+
+def test_default_cli_profile_applies_msm_nudging_and_parent_output_reduction() -> None:
+    from weather_sim.cli import _parser
+    args = _parser().parse_args(["run-case", "--start", "2026-09-04 12:00", "--end", "2026-09-04 20:00"])
+    text = render_namelist_input(load_config(args.template))
+    assert "grid_fdda = 1, 1, 1," in text
+    assert "history_interval = 60, 60, 10," in text
+    assert "gfdda_end_h = 15, 15, 15," in text

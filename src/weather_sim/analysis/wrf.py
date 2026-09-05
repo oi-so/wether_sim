@@ -9,6 +9,7 @@ import pandas as pd
 import xarray as xr
 
 from weather_sim.errors import WRFOutputError
+from weather_sim.analysis.spatial import nearest_grid_index
 
 
 def _decode_times(dataset: xr.Dataset) -> pd.DatetimeIndex:
@@ -25,7 +26,7 @@ def _decode_times(dataset: xr.Dataset) -> pd.DatetimeIndex:
     raise WRFOutputError("wrfout has neither Times nor usable XTIME metadata")
 
 
-def open_wrfout(path: str | Path) -> xr.Dataset:
+def open_wrfout(path: str | Path, *, points: list[tuple[float, float]] | None = None) -> xr.Dataset:
     """Open one wrfout file and expose normalized SI/analysis variables."""
     wrf_path = Path(path)
     if not wrf_path.is_file():
@@ -39,11 +40,26 @@ def open_wrfout(path: str | Path) -> xr.Dataset:
     if missing:
         source.close()
         raise WRFOutputError(f"WRF output is missing variables: {', '.join(sorted(missing))}")
-    times = _decode_times(source)
+    try:
+        times = _decode_times(source)
+        if not times.is_monotonic_increasing or times.has_duplicates:
+            raise WRFOutputError("WRF timestamps must be strictly increasing and unique")
+    except Exception:
+        source.close()
+        raise
     if len(times) != source.sizes.get("Time", len(times)):
         source.close()
         raise WRFOutputError("WRF time coordinate length does not match Time dimension")
     dataset = source.assign_coords(Time=times)
+    if points:
+        # Select on the raw, lazily indexed NetCDF before derived variables
+        # materialize whole horizontal fields. The nearest cells are unchanged.
+        lat = source["XLAT"].isel(Time=0) if "Time" in source["XLAT"].dims else source["XLAT"]
+        lon = source["XLONG"].isel(Time=0) if "Time" in source["XLONG"].dims else source["XLONG"]
+        indices = [nearest_grid_index(lat.values, lon.values, *point) for point in points]
+        ys, xs = zip(*indices)
+        dataset = dataset.isel(south_north=slice(min(ys), max(ys) + 1), west_east=slice(min(xs), max(xs) + 1))
+        dataset.attrs.update(grid_y_offset=min(ys), grid_x_offset=min(xs))
     dataset["temperature_2m_c"] = dataset["T2"] - 273.15
     dataset["temperature_2m_c"].attrs.update(units="degC", long_name="2 m air temperature")
     dataset["wind_speed_10m_ms"] = np.hypot(dataset["U10"], dataset["V10"])
@@ -70,7 +86,14 @@ def open_wrfout(path: str | Path) -> xr.Dataset:
         accumulated = dataset["RAINC"] + dataset["RAINNC"]
         dataset["precipitation_accumulated_mm"] = accumulated
         interval = accumulated.diff("Time", label="upper")
-        first = accumulated.isel(Time=0).expand_dims(Time=[times[0]])
-        dataset["precipitation_interval_mm"] = xr.concat([first, interval], dim="Time").clip(min=0)
+        first = xr.full_like(accumulated.isel(Time=0), np.nan).expand_dims(Time=[times[0]])
+        intervals = xr.concat([first, interval], dim="Time")
+        # No previous record at file start; a cumulative reset is not zero rain.
+        dataset["precipitation_interval_mm"] = intervals.where(intervals >= 0)
         dataset["precipitation_interval_mm"].attrs.update(units="mm", long_name="interval precipitation")
+        dataset["precipitation_interval_hours"] = xr.DataArray(
+            np.r_[np.nan, (times[1:] - times[:-1]).total_seconds() / 3600],
+            dims="Time", coords={"Time": times}, attrs={"units": "h"}
+        )
+    dataset.set_close(source.close)
     return dataset

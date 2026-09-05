@@ -190,7 +190,7 @@ uv run weather-sim cleanup-case --help
 ```
 # 2026-09-05追加：改善実験の再計算
 
-通常の日時指定だけではFDDAは有効になりません。改善実験にはテンプレートを明示してください。既存の `wrf_run` があるケースは上書きせずエラーになるので、新しいケース名を指定します。
+2026-09-05の追加修正から、通常の日時指定では `config/msm_guided.yaml` を使用し、FDDAと親領域60分出力が有効になります。精度改善は未検証です。テンプレートを明示する場合は以下の例を使えます。従来条件は `--template config/case_20260901.yaml` で選択できます。既存の `wrf_run` があるケースは上書きせずエラーになるので、新しいケース名を指定します。
 
 ```bash
 ./scripts/run_weather_case.sh "2026-09-04 12:00" "2026-09-04 20:00" \
@@ -202,3 +202,5 @@ uv run weather-sim cleanup-case --help
 開始時の `grid_nudging=True` 表示と、ケース内 `case.json` の `configuration.wrf.grid_nudging` で設定を確認できます。親領域の出力間隔は `analysis.parent_output_interval_minutes` で指定し、省略すると従来どおり全領域同じ間隔です。積分は解析終了まで、境界入力の準備はその後の3時間境界まで行います。
 
 完走後は従来の `prepare_observations.sh` と `evaluate_weather_case.sh` に新しいケースフォルダを渡してください。既存の同じ日時の観測CSVを使う場合は `weather-sim evaluate-case CASE --observations CSV` でも評価できます。評価・原因分析の詳細は `docs/evaluation_20260905.md` にあります。
+
+Thompson物理の参照表は `data/cache/thompson/` に保存し、同一WRFバイナリとチェックサムが一致した場合だけ再利用します。ケースへの配置は独立したコピーです。キャッシュを削除しても次のWRF実行で再生成されます。失敗時は `real.stdout.log.rsl-error.txt` 等にも致命的エラーの記録を保存するようになりました。

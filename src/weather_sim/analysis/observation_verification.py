@@ -66,7 +66,11 @@ def _model_series(
     times = pd.DatetimeIndex(pd.to_datetime(dataset["Time"].values, utc=True))
     values = np.asarray(extracted.values, dtype=float)
     if specification.model_variable == "precipitation_rate_mm_h":
-        hours = pd.Series(times).diff().dt.total_seconds().to_numpy() / 3600.0
+        hours = (
+            dataset["precipitation_interval_hours"].values
+            if "precipitation_interval_hours" in dataset
+            else pd.Series(times).diff().dt.total_seconds().to_numpy() / 3600.0
+        )
         values = values / hours
     return pd.Series(values, index=times, name="model"), extracted
 
@@ -159,6 +163,7 @@ def evaluate_real_observations(
                 continue
             paired = _align_at_model_times(model, observed, tolerance)
             metrics = calculate_metrics(paired["model"], paired["observed"])
+            valid_pairs = paired.loc[np.isfinite(paired["model"]) & np.isfinite(paired["observed"])]
             base_name = f"{station_id}_{specification.output_name}"
             pairs_directory.mkdir(parents=True, exist_ok=True)
             paired.to_csv(pairs_directory / f"{base_name}.csv", index=False)
@@ -179,10 +184,10 @@ def evaluate_real_observations(
                     "variable_name": specification.label_ja,
                     "unit": specification.unit,
                     **metrics.as_dict(),
-                    "mean_model": float(paired["model"].mean()),
-                    "mean_observed": float(paired["observed"].mean()),
-                    "grid_y": grid_y,
-                    "grid_x": grid_x,
+                    "mean_model": float(valid_pairs["model"].mean()),
+                    "mean_observed": float(valid_pairs["observed"].mean()),
+                    "grid_y": grid_y + int(dataset.attrs.get("grid_y_offset", 0)),
+                    "grid_x": grid_x + int(dataset.attrs.get("grid_x_offset", 0)),
                     "grid_distance_km": float(extracted.attrs["grid_distance_km"]),
                     "observation_elevation_m": float(elevation.iloc[0]) if not elevation.empty else None,
                     "model_elevation_m": model_elevation,

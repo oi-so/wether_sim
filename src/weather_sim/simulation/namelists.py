@@ -102,7 +102,9 @@ def render_namelist_input(config: ExperimentConfig) -> str:
     history_intervals = [
         config.analysis.parent_output_interval_minutes or config.analysis.output_interval_minutes
     ] * (count - 1) + [config.analysis.output_interval_minutes]
-    run_hours = run.total_seconds() / 3600
+    # WRF Registry declares gfdda_end_h INTEGER. It describes the last
+    # analysis, including the bracketing input after the integration end.
+    fdda_end_hours = int((end - start).total_seconds() + 3599) // 3600
     pbl_switch = 0 if config.wrf.grid_nudging_in_pbl else 1
     fdda = ""
     if config.wrf.grid_nudging:
@@ -111,7 +113,7 @@ def render_namelist_input(config: ExperimentConfig) -> str:
  grid_fdda = {fields(1)}
  gfdda_inname = 'wrffdda_d<domain>',
  gfdda_interval_m = {fields(config.wrf.input_interval_seconds // 60)}
- gfdda_end_h = {fields(run_hours)}
+ gfdda_end_h = {fields(fdda_end_hours)}
  io_form_gfdda = 2,
  fgdt = {fields(0)}
  if_no_pbl_nudging_uv = {fields(pbl_switch)}

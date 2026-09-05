@@ -18,6 +18,7 @@ from weather_sim.data.forecast import PreparedForecastData, prepare_forecast_dat
 from weather_sim.errors import ExternalCommandError, ObservationDataError
 from weather_sim.observations.jma_download import download_fuchu_amedas
 from weather_sim.simulation.namelists import write_namelists
+from weather_sim.simulation.runtime_cache import cache_thompson_tables, restore_thompson_tables
 from weather_sim.visualization.animation import create_standard_animations
 from weather_sim.visualization.plots import plot_surface_field
 
@@ -59,6 +60,12 @@ def _run(command: list[str], directory: Path, log_name: str, env: dict[str, str]
             check=False,
         )
     if result.returncode:
+        # WRF sends most fatal diagnostics to rsl.*, often leaving stdout empty.
+        diagnostic = directory / "rsl.error.0000"
+        if diagnostic.is_file():
+            saved = directory / f"{log_name}.rsl-error.txt"
+            saved.write_text(diagnostic.read_text(errors="replace"), encoding="utf-8")
+            raise ExternalCommandError(f"{' '.join(command)} failed; see {saved}")
         raise ExternalCommandError(f"{' '.join(command)} failed; see {log_path}")
 
 
@@ -222,6 +229,7 @@ def _prepare_wrf_run(config: ExperimentConfig, project_root: Path, case_director
         if not target.exists() and not target.is_symlink():
             target.symlink_to(source.resolve())
     write_namelists(config, directory, str(project_root / "data/geographic/WPS_GEOG"))
+    restore_thompson_tables(directory, project_root / "data/cache/thompson")
     for met_em in sorted(wps.glob("met_em.d0*.nc")):
         _replace_symlink(directory / met_em.name, met_em)
     return directory
@@ -335,5 +343,6 @@ def run_case(
         "wrf.stdout.log",
         {"OMPI_MCA_btl": "self,vader"},
     )
+    cache_thompson_tables(run_directory, project_root / "data/cache/thompson")
     _visualize(config, run_directory, case_directory)
     return case_directory

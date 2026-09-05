@@ -76,8 +76,8 @@ def find_inner_wrfout(case: CaseContext) -> Path:
     return outputs[0]
 
 
-def _target_dataset(case: CaseContext):
-    dataset = open_wrfout(find_inner_wrfout(case))
+def _target_dataset(case: CaseContext, *, points: list[tuple[float, float]] | None = None):
+    dataset = open_wrfout(find_inner_wrfout(case), points=points)
     analysis = dataset.sel(Time=slice(case.start, case.end))
     if analysis.sizes.get("Time", 0) == 0:
         dataset.close()
@@ -216,7 +216,8 @@ def evaluate_case(
     )
     interval = float(case.manifest.get("output_interval_minutes", 10))
     tolerance = pd.Timedelta(minutes=tolerance_minutes if tolerance_minutes is not None else interval / 2)
-    dataset, analysis = _target_dataset(case)
+    stations = observations.loc[observations["is_valid"], ["latitude", "longitude"]].drop_duplicates()
+    dataset, analysis = _target_dataset(case, points=list(stations.itertuples(index=False, name=None)))
     try:
         destination = (
             Path(output_directory).resolve()
