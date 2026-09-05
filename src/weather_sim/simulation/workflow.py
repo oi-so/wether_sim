@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -271,7 +272,21 @@ def run_case(
     if Path(resolved_name).name != resolved_name:
         raise ValueError("case-name must be a single directory name")
     case_directory = project_root / "output" / resolved_name
+    if (case_directory / "wrf_run").exists():
+        raise ExternalCommandError(
+            f"case already contains a WRF run: {case_directory}; "
+            "use a new --case-name to preserve existing results and logs"
+        )
     case_directory.mkdir(parents=True, exist_ok=True)
+    snapshot = asdict(config)
+    snapshot.pop("source_path")
+    snapshot = json.loads(json.dumps(snapshot, default=str))
+    manifest_path = case_directory / "case.json"
+    if manifest_path.is_file():
+        previous = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if previous.get("configuration", snapshot) != snapshot:
+            raise ExternalCommandError("case configuration differs; use a new --case-name")
+    print(f"Case: {resolved_name}; template: {config.source_path}; grid_nudging={config.wrf.grid_nudging}")
     manifest = {
         "target_start": config.time.target_start.isoformat(),
         "target_end": config.time.target_end.isoformat(),
@@ -279,6 +294,9 @@ def run_case(
         "spinup_hours": config.time.spinup_hours,
         "simulation_start_utc": config.simulation_start_utc.isoformat(),
         "simulation_end_utc": config.simulation_end_utc.isoformat(),
+        "integration_end_utc": config.time.target_end_utc.isoformat(),
+        "configuration": snapshot,
+        "template_path": str(config.source_path) if config.source_path else None,
         "center": {"latitude": config.center.latitude, "longitude": config.center.longitude},
         "mpi_processes": processes,
         "analysis_radius_km": config.analysis.radius_km,
@@ -306,6 +324,11 @@ def run_case(
     wps = _prepare_wps(config, project_root, case_directory, data)
     run_directory = _prepare_wrf_run(config, project_root, case_directory, wps)
     _run([str(run_directory / "real.exe")], run_directory, "real.stdout.log", {"OMPI_MCA_btl": "self,vader"})
+    if config.wrf.grid_nudging:
+        for index in range(1, len(config.domains) + 1):
+            fdda_path = run_directory / f"wrffdda_d{index:02d}"
+            if not fdda_path.is_file() or fdda_path.stat().st_size == 0:
+                raise ExternalCommandError(f"real.exe did not generate nudging input: {fdda_path}")
     _run(
         ["mpirun", "-np", str(processes), str(run_directory / "wrf.exe")],
         run_directory,

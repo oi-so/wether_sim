@@ -59,7 +59,8 @@ def open_wrfout(path: str | Path) -> xr.Dataset:
         dataset["skin_temperature_c"] = dataset["TSK"] - 273.15
         dataset["skin_temperature_c"].attrs.update(units="degC", long_name="surface skin temperature")
     if "Q2" in dataset and "PSFC" in dataset:
-        vapor_pressure_pa = dataset["Q2"] * dataset["PSFC"] / (0.622 + 0.378 * dataset["Q2"])
+        # WRF Q2 is a mixing ratio (kg water / kg dry air), not specific humidity.
+        vapor_pressure_pa = dataset["Q2"] * dataset["PSFC"] / (0.622 + dataset["Q2"])
         saturation_pressure_pa = 611.2 * np.exp(
             17.67 * (dataset["T2"] - 273.15) / (dataset["T2"] - 29.65)
         )

@@ -111,12 +111,15 @@ class DomainConfig:
 class AnalysisConfig:
     radius_km: float
     output_interval_minutes: int
+    parent_output_interval_minutes: int | None = None
 
     def __post_init__(self) -> None:
         if self.radius_km <= 0:
             raise ConfigurationError("analysis.radius_km must be positive")
         if self.output_interval_minutes <= 0:
             raise ConfigurationError("analysis.output_interval_minutes must be positive")
+        if self.parent_output_interval_minutes is not None and self.parent_output_interval_minutes <= 0:
+            raise ConfigurationError("analysis.parent_output_interval_minutes must be positive")
 
 
 @dataclass(frozen=True)
@@ -258,6 +261,10 @@ class ExperimentConfig:
             analysis=AnalysisConfig(
                 radius_km=float(analysis.get("radius_km", 20)),
                 output_interval_minutes=int(analysis.get("output_interval_minutes", 10)),
+                parent_output_interval_minutes=(
+                    int(analysis["parent_output_interval_minutes"])
+                    if analysis.get("parent_output_interval_minutes") is not None else None
+                ),
             ),
             observations=ObservationConfig(
                 use_amedas=bool(observations.get("use_amedas", True)),

@@ -33,6 +33,9 @@ def test_open_wrfout_derives_temperature_wind_and_precipitation(tmp_path) -> Non
         assert opened["surface_pressure_hpa"].isel(Time=0, south_north=0, west_east=0).item() == 1000
         assert opened["skin_temperature_c"].isel(Time=0, south_north=0, west_east=0).item() == 22
         assert 60 < opened["relative_humidity_2m_percent"].isel(Time=0, south_north=0, west_east=0).item() < 100
+        vapor_pressure = 0.01 * 100000 / (0.622 + 0.01)
+        saturation = 611.2 * np.exp(17.67 * 20 / (293.15 - 29.65))
+        assert opened["relative_humidity_2m_percent"].isel(Time=0, south_north=0, west_east=0).item() == pytest.approx(100 * vapor_pressure / saturation)
         assert opened["precipitation_interval_mm"].isel(Time=1, south_north=0, west_east=0).item() == 2.0
     finally:
         opened.close()

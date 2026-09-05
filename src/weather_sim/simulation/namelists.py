@@ -94,9 +94,14 @@ def render_namelist_input(config: ExperimentConfig) -> str:
     domains = config.domains
     start, end = _dates(config)
     count = len(domains)
-    run = end - start
+    # real.exe needs the bracketing input time, whereas wrf.exe gives run_*
+    # precedence and can finish at the requested analysis end.
+    run = config.time.target_end_utc.replace(tzinfo=None) - start
     starts = [(1, 1)] + [_parent_start(domains[i - 1], domains[i]) for i in range(1, count)]
     fields = lambda value: _values([value] * count)
+    history_intervals = [
+        config.analysis.parent_output_interval_minutes or config.analysis.output_interval_minutes
+    ] * (count - 1) + [config.analysis.output_interval_minutes]
     run_hours = run.total_seconds() / 3600
     pbl_switch = 0 if config.wrf.grid_nudging_in_pbl else 1
     fdda = ""
@@ -126,6 +131,7 @@ def render_namelist_input(config: ExperimentConfig) -> str:
  run_days = {run.days},
  run_hours = {run.seconds // 3600},
  run_minutes = {(run.seconds % 3600) // 60},
+ run_seconds = {run.seconds % 60},
  start_year = {fields(start.year)}
  start_month = {fields(start.month)}
  start_day = {fields(start.day)}
@@ -140,7 +146,7 @@ def render_namelist_input(config: ExperimentConfig) -> str:
  end_second = {fields(end.second)}
  interval_seconds = {config.wrf.input_interval_seconds},
  input_from_file = {_values([True] * count)}
- history_interval = {fields(config.analysis.output_interval_minutes)}
+ history_interval = {_values(history_intervals)}
  frames_per_outfile = {fields(1000)}
  restart = .false.,
  io_form_history = 2,

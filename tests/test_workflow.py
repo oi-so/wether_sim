@@ -9,6 +9,17 @@ from weather_sim.errors import ExternalCommandError
 from weather_sim.simulation.workflow import _validate_metgrid_inputs
 
 
+def test_run_case_refuses_to_overwrite_previous_run(tmp_path: Path) -> None:
+    from weather_sim.simulation.workflow import run_case
+    case = tmp_path / "output/existing"
+    (case / "wrf_run").mkdir(parents=True)
+    manifest = case / "case.json"
+    manifest.write_text('{"original": true}')
+    with pytest.raises(ExternalCommandError, match="new --case-name"):
+        run_case(load_config("config/case_20260904.yaml"), tmp_path, case_name="existing")
+    assert manifest.read_text() == '{"original": true}'
+
+
 def _write_met_em(directory: Path, soil_temperature_k: float) -> None:
     config = load_config("config/case_20260901.yaml")
     timestamp = config.simulation_start_utc.replace(tzinfo=None)

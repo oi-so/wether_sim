@@ -34,3 +34,23 @@ def test_fdda_case_enables_three_hourly_grid_nudging() -> None:
     assert "gfdda_interval_m = 180, 180, 180," in text
     assert "if_no_pbl_nudging_t = 0, 0, 0," in text
     assert "gt = 0.0003, 0.0003, 0.0003," in text
+
+
+def test_efficient_case_preserves_boundary_bracket_and_inner_output() -> None:
+    config = load_config("config/case_20260904_fdda_efficient.yaml")
+    wrf = render_namelist_input(config)
+    wps = render_namelist_wps(config, "/opt/WPS_GEOG")
+    assert "run_hours = 14," in wrf
+    assert "end_hour = 12, 12, 12," in wrf  # real.exe still prepares 21 JST input
+    assert "2026-09-04_12:00:00" in wps
+    assert "history_interval = 60, 60, 10," in wrf
+    assert "gfdda_end_h = 14.0, 14.0, 14.0," in wrf
+    assert "grid_fdda = 1, 1, 1," in wrf
+
+
+def test_runtime_keeps_seconds_at_unaligned_end() -> None:
+    from dataclasses import replace
+    from datetime import timedelta
+    config = load_config("config/case_20260904.yaml")
+    config = replace(config, time=replace(config.time, target_end=config.time.target_end + timedelta(seconds=35)))
+    assert "run_seconds = 35," in render_namelist_input(config)

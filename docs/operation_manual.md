@@ -188,3 +188,17 @@ uv run weather-sim prepare-observations --help
 uv run weather-sim evaluate-case --help
 uv run weather-sim cleanup-case --help
 ```
+# 2026-09-05追加：改善実験の再計算
+
+通常の日時指定だけではFDDAは有効になりません。改善実験にはテンプレートを明示してください。既存の `wrf_run` があるケースは上書きせずエラーになるので、新しいケース名を指定します。
+
+```bash
+./scripts/run_weather_case.sh "2026-09-04 12:00" "2026-09-04 20:00" \
+  --template config/case_20260904_fdda_efficient.yaml \
+  --case-name case_20260904T1200_20260904T2000_fdda_efficient \
+  --spinup-hours 6 --processes 4 --no-animation
+```
+
+開始時の `grid_nudging=True` 表示と、ケース内 `case.json` の `configuration.wrf.grid_nudging` で設定を確認できます。親領域の出力間隔は `analysis.parent_output_interval_minutes` で指定し、省略すると従来どおり全領域同じ間隔です。積分は解析終了まで、境界入力の準備はその後の3時間境界まで行います。
+
+完走後は従来の `prepare_observations.sh` と `evaluate_weather_case.sh` に新しいケースフォルダを渡してください。既存の同じ日時の観測CSVを使う場合は `weather-sim evaluate-case CASE --observations CSV` でも評価できます。評価・原因分析の詳細は `docs/evaluation_20260905.md` にあります。
