@@ -192,7 +192,7 @@ uv run weather-sim cleanup-case --help
 ```
 # 2026-09-05追加：改善実験の再計算
 
-2026-09-05の追加修正から、通常の日時指定では `config/msm_guided.yaml` を使用し、FDDAと親領域60分出力が有効になります。精度改善は未検証です。テンプレートを明示する場合は以下の例を使えます。従来条件は `--template config/case_20260901.yaml` で選択できます。既存の `wrf_run` があるケースは上書きせずエラーになるので、新しいケース名を指定します。
+2026-09-05の追加修正から、通常の日時指定では `config/msm_guided.yaml` を使用し、FDDAと親領域60分出力が有効になります。9月6日の評価で9月4日事例の気温・風の改善を確認しましたが、気圧悪化と乾燥偏差が残ります（[最新評価](evaluation_20260906.md)）。テンプレートを明示する場合は以下の例を使えます。従来条件は `--template config/case_20260901.yaml` で選択できます。既存の `wrf_run` があるケースは上書きせずエラーになるので、新しいケース名を指定します。
 
 ```bash
 ./scripts/run_weather_case.sh "2026-09-04 12:00" "2026-09-04 20:00" \
@@ -206,3 +206,13 @@ uv run weather-sim cleanup-case --help
 完走後は従来の `prepare_observations.sh` と `evaluate_weather_case.sh` に新しいケースフォルダを渡してください。既存の同じ日時の観測CSVを使う場合は `weather-sim evaluate-case CASE --observations CSV` でも評価できます。評価・原因分析の詳細は `docs/evaluation_20260905.md` にあります。
 
 Thompson物理の参照表は `data/cache/thompson/` に保存し、同一WRFバイナリとチェックサムが一致した場合だけ再利用します。ケースへの配置は独立したコピーです。キャッシュを削除しても次のWRF実行で再生成されます。失敗時は `real.stdout.log.rsl-error.txt` 等にも致命的エラーの記録を保存するようになりました。
+
+## 2026-09-06追加：湿度・降水の診断
+
+`evaluate-case` は通常の評価に加え、`moisture_summary.csv` と `pairs/*_moisture_diagnostics.csv` を生成します。同じ観測時刻の気温とRHを使い、露点誤差とRH誤差の温度成分・水蒸気成分を示します。観測を使った事後診断なので、補正後予報としては扱いません。
+
+学校の `precipitation_accumulated` がある場合、`precipitation_accumulation_difference` としてWRFと同じ区間の雨量差分も評価します。区間境界が欠測、または途中に欠測・積算リセットがある区間は除外します。開始前の観測がなければ最初の区間はNに入りません。
+
+水蒸気のみ拘束を強める未検証候補は `config/msm_guided_moisture.yaml` です。現在の既定は実測改善を確認した `msm_guided.yaml` のままです。候補を後日実験するときだけ `--template config/msm_guided_moisture.yaml` と別の `--case-name` を指定してください。この変更時点では再シミュレーションしていません。
+
+以後の外部工程はログ横の `*.timing.json` に開始・終了UTC、経過秒、終了コードを保存します。WRFログの親領域積分時間と、全プロセスの実時間を分けて比較できます。

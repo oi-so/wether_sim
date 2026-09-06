@@ -47,3 +47,27 @@ def test_metgrid_soil_temperature_validation_rejects_zero_kelvin(tmp_path: Path)
 
     with pytest.raises(ExternalCommandError, match="invalid metgrid land soil temperature"):
         _validate_metgrid_inputs(tmp_path, config)
+
+
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_command_timing_preserves_failure_diagnostics(tmp_path: Path, monkeypatch, returncode: int) -> None:
+    import json
+    import subprocess
+    from datetime import datetime
+    from weather_sim.simulation import workflow
+
+    # Mock the subprocess: this test must never launch WRF or WPS.
+    monkeypatch.setattr(workflow.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a[0], returncode))
+    ticks = iter([10.0, 12.5])
+    monkeypatch.setattr(workflow, "perf_counter", lambda: next(ticks))
+    (tmp_path / "rsl.error.0000").write_text("fatal diagnostic")
+    if returncode:
+        with pytest.raises(ExternalCommandError, match="rsl-error.txt"):
+            workflow._run(["mock-model"], tmp_path, "stage.log")
+        assert (tmp_path / "stage.log.rsl-error.txt").read_text() == "fatal diagnostic"
+    else:
+        workflow._run(["mock-model"], tmp_path, "stage.log")
+    timing = json.loads((tmp_path / "stage.log.timing.json").read_text())
+    assert timing["elapsed_seconds"] == 2.5
+    assert timing["returncode"] == returncode
+    assert datetime.fromisoformat(timing["started_at_utc"]).utcoffset().total_seconds() == 0

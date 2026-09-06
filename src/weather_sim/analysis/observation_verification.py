@@ -16,6 +16,7 @@ import xarray as xr
 
 from weather_sim.analysis.metrics import calculate_metrics
 from weather_sim.analysis.spatial import extract_nearest_series
+from weather_sim.analysis.verification_diagnostics import cumulative_intervals, humidity_components
 from weather_sim.observations.csv_reader import convert_temperature_to_celsius
 
 matplotlib.rcParams["font.family"] = ["Hiragino Sans", "DejaVu Sans"]
@@ -37,6 +38,7 @@ VARIABLES = (
     VerificationVariable("wind_speed", "wind_speed_10m_ms", "wind_speed", "風速", "m/s"),
     VerificationVariable("pressure", "surface_pressure_hpa", "pressure", "地表気圧", "hPa"),
     VerificationVariable("precipitation", "precipitation_interval_mm", "precipitation", "時間降水量", "mm"),
+    VerificationVariable("precipitation_accumulated", "precipitation_interval_mm", "precipitation_accumulation_difference", "区間降水量（積算観測差分）", "mm"),
     VerificationVariable("precipitation_rate", "precipitation_rate_mm_h", "precipitation_rate", "降水強度", "mm/h"),
 )
 
@@ -133,6 +135,7 @@ def evaluate_real_observations(
     pairs_directory = output / "pairs"
     plots_directory = output / "plots"
     records: list[dict[str, object]] = []
+    moisture_records: list[dict[str, object]] = []
     available = set(dataset.variables)
     for station_id in sorted(observations["station_id"].astype(str).unique()):
         station = observations[
@@ -144,6 +147,7 @@ def evaluate_real_observations(
         latitude = float(station["latitude"].iloc[0])
         longitude = float(station["longitude"].iloc[0])
         elevation = pd.to_numeric(station["elevation_m"], errors="coerce").dropna()
+        station_pairs: dict[str, pd.DataFrame] = {}
         for specification in VARIABLES:
             source_name = (
                 "precipitation_interval_mm"
@@ -156,12 +160,20 @@ def evaluate_real_observations(
             rows["normalized_value"] = _observation_values(rows, specification)
             observed = rows.set_index("timestamp")["normalized_value"]
             observed.index = pd.to_datetime(observed.index, utc=True)
-            observed = observed.loc[(observed.index >= start) & (observed.index <= end)]
             model, extracted = _model_series(dataset, specification, latitude, longitude)
             model = model.loc[(model.index >= start) & (model.index <= end)]
+            if specification.observation_variable == 'precipitation_accumulated':
+                if 'precipitation_interval_hours' not in dataset:
+                    continue
+                durations = pd.Series(dataset['precipitation_interval_hours'].values,
+                                      index=pd.to_datetime(dataset.Time.values, utc=True)).reindex(model.index)
+                observed = cumulative_intervals(observed, model.index, durations.to_numpy())
+            else:
+                observed = observed.loc[(observed.index >= start) & (observed.index <= end)]
             if observed.empty or model.empty:
                 continue
             paired = _align_at_model_times(model, observed, tolerance)
+            station_pairs[specification.output_name] = paired
             metrics = calculate_metrics(paired["model"], paired["observed"])
             valid_pairs = paired.loc[np.isfinite(paired["model"]) & np.isfinite(paired["observed"])]
             base_name = f"{station_id}_{specification.output_name}"
@@ -193,9 +205,19 @@ def evaluate_real_observations(
                     "model_elevation_m": model_elevation,
                 }
             )
+        if {'temperature', 'humidity'}.issubset(station_pairs):
+            moisture = humidity_components(station_pairs['temperature'], station_pairs['humidity'])
+            moisture.to_csv(pairs_directory / f'{station_id}_moisture_diagnostics.csv', index=False)
+            dew = calculate_metrics(moisture.model_dewpoint_c, moisture.observed_dewpoint_c)
+            moisture_records.append({
+                'station_id': station_id, 'dewpoint_bias_c': dew.bias, 'dewpoint_rmse_c': dew.rmse, 'n': dew.n,
+                'thermal_rh_error_points': float(moisture.thermal_rh_error_points.mean()),
+                'moisture_rh_error_points': float(moisture.moisture_rh_error_points.mean()),
+            })
     summary = pd.DataFrame.from_records(records)
     output.mkdir(parents=True, exist_ok=True)
     summary.to_csv(output / "verification_summary.csv", index=False)
+    pd.DataFrame(moisture_records).to_csv(output / 'moisture_summary.csv', index=False)
     (output / "verification_summary.json").write_text(
         json.dumps(records, ensure_ascii=False, indent=2, allow_nan=True) + "\n",
         encoding="utf-8",

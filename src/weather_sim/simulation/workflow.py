@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from time import perf_counter
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -50,6 +51,8 @@ def _run(command: list[str], directory: Path, log_name: str, env: dict[str, str]
     merged_env = os.environ.copy()
     if env:
         merged_env.update(env)
+    started_at = datetime.now(timezone.utc)
+    started = perf_counter()
     with log_path.open("w", encoding="utf-8") as log:
         result = subprocess.run(
             command,
@@ -60,6 +63,11 @@ def _run(command: list[str], directory: Path, log_name: str, env: dict[str, str]
             text=True,
             check=False,
         )
+    (directory / f'{log_name}.timing.json').write_text(json.dumps({
+        'command': command, 'started_at_utc': started_at.isoformat(),
+        'finished_at_utc': datetime.now(timezone.utc).isoformat(),
+        'elapsed_seconds': perf_counter() - started, 'returncode': result.returncode,
+    }, indent=2) + '\n', encoding='utf-8')
     if result.returncode:
         # WRF sends most fatal diagnostics to rsl.*, often leaving stdout empty.
         diagnostic = directory / "rsl.error.0000"

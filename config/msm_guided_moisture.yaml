@@ -1,6 +1,6 @@
-# Default run-case profile: MSM-guided sensitivity experiment.
-# Dates are overridden by CLI --start/--end. Validated on 2026-09-04 only:
-# temperature/wind improved, pressure worsened. Keep as the comparison baseline.
+# Candidate sensitivity experiment, not yet run or validated.
+# Changes ONLY moisture relaxation: 27.8 hours -> 5.56 hours.
+# Compare against msm_guided.yaml on both stations, including pressure/rain.
 center:
   latitude: 35.69247912845154
   longitude: 139.41296806119965
@@ -42,4 +42,4 @@ wrf:
   grid_nudging_in_pbl: true
   nudging_uv_s: 0.0003
   nudging_temperature_s: 0.0003
-  nudging_moisture_s: 0.00001
+  nudging_moisture_s: 0.00005
