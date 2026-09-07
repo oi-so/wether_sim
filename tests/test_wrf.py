@@ -56,3 +56,33 @@ def test_open_wrfout_derives_temperature_wind_and_precipitation(tmp_path) -> Non
     from weather_sim.errors import WRFOutputError
     with pytest.raises(WRFOutputError, match="unique"):
         open_wrfout(path)
+
+
+def test_surface_wind_rotation_preserves_speed_and_raw_components(tmp_path) -> None:
+    from weather_sim.errors import WRFOutputError
+    dims = ("Time", "south_north", "west_east")
+    array = np.ones((1, 2, 2), dtype=np.float32)
+    ds = xr.Dataset({name: (dims, array * value) for name, value in
+                     {"T2": 293.15, "U10": 3., "V10": 4., "XLAT": 35., "XLONG": 139.,
+                      "COSALPHA": 0., "SINALPHA": 1.}.items()},
+                    attrs={"MAP_PROJ": 1, "SIMULATION_START_DATE": "2026-09-04_03:00:00"})
+    ds["XTIME"] = ("Time", [0.])
+    path = tmp_path / "wrfout"
+    ds.to_netcdf(path)
+    with open_wrfout(path) as full, open_wrfout(path, points=[(35., 139.)]) as point:
+        assert point.eastward_wind_10m_ms.item() == -4.
+        assert point.northward_wind_10m_ms.item() == 3.
+        assert point.wind_speed_10m_ms.item() == 5.
+        assert point.U10.item() == 3.
+        assert point.V10.item() == 4.
+        assert point.wind_direction_10m_deg.item() == pytest.approx(126.87, abs=.01)
+        for name in ("temperature_2m_c", "eastward_wind_10m_ms", "northward_wind_10m_ms", "wind_speed_10m_ms"):
+            np.testing.assert_array_equal(point[name].values.ravel(), full[name].isel(south_north=0, west_east=0).values)
+    ds["U10"][:] = 0.
+    ds["V10"][:] = 0.
+    ds.to_netcdf(path)
+    with open_wrfout(path) as calm:
+        assert np.isnan(calm.wind_direction_10m_deg).all()
+    ds.drop_vars("COSALPHA").to_netcdf(path)
+    with pytest.raises(WRFOutputError, match="COSALPHA"):
+        open_wrfout(path)

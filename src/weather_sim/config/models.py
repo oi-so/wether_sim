@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from math import isfinite
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -174,8 +175,8 @@ class WRFConfig:
             ("nudging_temperature_s", self.nudging_temperature_s),
             ("nudging_moisture_s", self.nudging_moisture_s),
         ):
-            if value < 0:
-                raise ConfigurationError(f"wrf.{name} must be non-negative")
+            if not isfinite(value) or value < 0:
+                raise ConfigurationError(f"wrf.{name} must be finite and non-negative")
         if self.map_projection not in {"lambert"}:
             raise ConfigurationError("Version 1 currently supports only the Lambert projection")
 

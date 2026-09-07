@@ -1,0 +1,8 @@
+school:
+  latitude: 35.69247912845154
+  longitude: 139.41296806119965
+  ground_elevation_m: 83.5
+  pressure_sensor_height_m: 15.0
+  pressure_type: station
+  height_is_approximate: true
+  source: "ユーザー申告 2026-09-07：地理院地図の地面標高83.5 m、5階で地上約15 m、現地気圧"

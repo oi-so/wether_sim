@@ -16,6 +16,13 @@ def test_default_config_loads_and_converts_jst_to_utc() -> None:
     assert [domain.width_km for domain in config.domains] == [891.0, 297.0, 99.0]
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -1.])
+def test_nudging_coefficient_must_be_finite(value) -> None:
+    from dataclasses import replace
+    with pytest.raises(ConfigurationError, match="finite and non-negative"):
+        replace(load_config("config/msm_guided.yaml").wrf, nudging_moisture_s=value)
+
+
 def test_naive_datetime_uses_configured_timezone() -> None:
     config = ExperimentConfig.from_dict(
         {

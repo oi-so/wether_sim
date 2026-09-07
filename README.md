@@ -403,7 +403,7 @@ uv run weather-sim analyze config/default.yaml \
 
 学校と府中アメダスの実観測について、気温・相対湿度・風速・地表気圧・降水を一括評価できます。
 
-2026-09-06の完走結果では、FDDAにより学校・府中の気温RMSEが約73%改善しました。一方、気圧悪化と乾燥・降水不足が残ります。[評価と改善候補](docs/evaluation_20260906.md) に精度・計算時間比較を記録しています。評価は積算雨量の区間差分と、露点・湿度誤差の原因診断も出力します。
+FDDAにより学校・府中の気温RMSEが約73%改善しました。2026-09-07に学校の設置標高が確認でき、同じ高度の気圧RMSEも1.15→0.41 hPaへ改善したと評価を修正しています。乾燥・降水不足は残ります。[最新の評価・修正・検証方法](docs/evaluation_20260907.md) に記録しています。`audit-case` で既存出力の安定性検査、`evaluate-case --station-metadata config/station_metadata.yaml` で観測高度の気圧比較ができます。
 
 ```bash
 uv run weather-sim evaluate-observations \

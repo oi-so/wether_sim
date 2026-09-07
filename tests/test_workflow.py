@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 
@@ -22,16 +23,18 @@ def test_run_case_refuses_to_overwrite_previous_run(tmp_path: Path) -> None:
 
 def _write_met_em(directory: Path, soil_temperature_k: float) -> None:
     config = load_config("config/case_20260901.yaml")
-    timestamp = config.simulation_start_utc.replace(tzinfo=None)
-    path = directory / f"met_em.d03.{timestamp:%Y-%m-%d_%H:%M:%S}.nc"
-    xr.Dataset(
+    dataset = xr.Dataset(
         {
             "ST": (("Time", "num_st_layers", "y", "x"), np.full((1, 4, 2, 2), soil_temperature_k)),
             "LANDSEA": (("Time", "y", "x"), np.ones((1, 2, 2))),
             "TT": (("Time", "num_metgrid_levels", "y", "x"), np.full((1, 2, 2, 2), 298.0)),
             "RH": (("Time", "num_metgrid_levels", "y", "x"), np.full((1, 2, 2, 2), 60.0)),
         }
-    ).to_netcdf(path)
+    )
+    for timestamp in pd.date_range(config.simulation_start_utc, config.simulation_end_utc,
+                                   freq=pd.Timedelta(seconds=config.wrf.input_interval_seconds)):
+        for domain in range(1, len(config.domains) + 1):
+            dataset.to_netcdf(directory / f"met_em.d{domain:02d}.{timestamp:%Y-%m-%d_%H:%M:%S}.nc")
 
 
 def test_metgrid_soil_temperature_validation_accepts_physical_values(tmp_path: Path) -> None:
@@ -47,6 +50,38 @@ def test_metgrid_soil_temperature_validation_rejects_zero_kelvin(tmp_path: Path)
 
     with pytest.raises(ExternalCommandError, match="invalid metgrid land soil temperature"):
         _validate_metgrid_inputs(tmp_path, config)
+
+
+def test_metgrid_validation_checks_late_parent_file_and_partial_nan(tmp_path: Path) -> None:
+    config = load_config("config/case_20260901.yaml")
+    _write_met_em(tmp_path, 300.)
+    last = sorted(tmp_path.glob("met_em.d01.*"))[-1]
+    with xr.open_dataset(last) as source:
+        corrupt = source.load()
+    corrupt["ST"][0, 0, 0, 0] = np.nan
+    corrupt.to_netcdf(last)
+    with pytest.raises(ExternalCommandError, match="non-finite"):
+        _validate_metgrid_inputs(tmp_path, config)
+    last.unlink()
+    with pytest.raises(ExternalCommandError, match="expected input"):
+        _validate_metgrid_inputs(tmp_path, config)
+
+
+def test_metgrid_ocean_soil_mask_and_small_supersaturation(tmp_path: Path) -> None:
+    from weather_sim.simulation.input_validation import validate_metgrid_file
+    _write_met_em(tmp_path, 300.)
+    path = next(tmp_path.glob("met_em*"))
+    with xr.open_dataset(path) as source:
+        dataset = source.load()
+    dataset["LANDSEA"][:] = 0.
+    dataset["ST"][:] = np.nan
+    dataset["RH"][:] = 100.1
+    dataset.to_netcdf(path)
+    validate_metgrid_file(path)
+    dataset["TT"][0, 0, 0, 0] = np.nan
+    dataset.to_netcdf(path)
+    with pytest.raises(ExternalCommandError, match="non-finite"):
+        validate_metgrid_file(path)
 
 
 @pytest.mark.parametrize("returncode", [0, 1])

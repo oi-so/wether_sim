@@ -216,3 +216,13 @@ Thompson物理の参照表は `data/cache/thompson/` に保存し、同一WRFバ
 水蒸気のみ拘束を強める未検証候補は `config/msm_guided_moisture.yaml` です。現在の既定は実測改善を確認した `msm_guided.yaml` のままです。候補を後日実験するときだけ `--template config/msm_guided_moisture.yaml` と別の `--case-name` を指定してください。この変更時点では再シミュレーションしていません。
 
 以後の外部工程はログ横の `*.timing.json` に開始・終了UTC、経過秒、終了コードを保存します。WRFログの親領域積分時間と、全プロセスの実時間を分けて比較できます。
+
+## 2026-09-07追加：安定性検査と学校の気圧高度
+
+`uv run weather-sim audit-case CASE` は既存の全領域の出力・rslを読み、`analysis/stability.json` にNaN、範囲外、層厚・気圧、積算雨量減少、解析時刻の不足を保存します。終了コード0は指摘なし、1は確認すべき指摘あり、2は処理エラー。WRFを起動・停止するコマンドではありません。保存間隔より短い振動の安定性は保証しません。
+
+学校の現地気圧センサーは地面83.5 m＋5階約15 m＝標高約98.5 m（ユーザー確認、概算）として `config/station_metadata.yaml` に保存しました。`evaluate-case CASE --station-metadata config/station_metadata.yaml` で、未換算気圧と観測高度にそろえた気圧の両方を出力します。ケース内の `observations/station_metadata.yaml` があれば自動使用します。現在の学校と異なる位置の観測へこのメタデータを流用しないでください。
+
+観測値は変更せず、モデル側の短層静力学換算を行います。センサーの高さを測り直した場合はメタデータを更新して再評価できます。換算した指標は `pressure_sensor_height`、使用メタデータは評価フォルダの `station_metadata.json` に残ります。気温・風・湿度の設置高さはこの処理で補正しません。
+
+今回の [問題点・修正コード・検証方法](evaluation_20260907.md) と `scripts/benchmark_surface_read.py` に、精度を変えない後処理高速化の再現手順があります。

@@ -115,8 +115,8 @@ def create_field_animation(
         quiver = axis.quiver(
             longitude.values[::vector_step, ::vector_step],
             latitude.values[::vector_step, ::vector_step],
-            dataset["U10"].isel(Time=0).values[::vector_step, ::vector_step],
-            dataset["V10"].isel(Time=0).values[::vector_step, ::vector_step],
+            dataset["eastward_wind_10m_ms"].isel(Time=0).values[::vector_step, ::vector_step],
+            dataset["northward_wind_10m_ms"].isel(Time=0).values[::vector_step, ::vector_step],
             color="black",
             alpha=0.7,
         )
@@ -131,8 +131,8 @@ def create_field_animation(
         artists: list[object] = [mesh, timestamp_title]
         if quiver is not None:
             quiver.set_UVC(
-                dataset["U10"].isel(Time=index).values[::vector_step, ::vector_step],
-                dataset["V10"].isel(Time=index).values[::vector_step, ::vector_step],
+                dataset["eastward_wind_10m_ms"].isel(Time=index).values[::vector_step, ::vector_step],
+                dataset["northward_wind_10m_ms"].isel(Time=index).values[::vector_step, ::vector_step],
             )
             artists.append(quiver)
         return artists

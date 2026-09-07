@@ -12,6 +12,13 @@ from weather_sim.errors import WRFOutputError
 from weather_sim.analysis.spatial import nearest_grid_index
 
 
+def _load_station_surface(dataset: xr.Dataset) -> None:
+    """Reuse selected surface reads without loading the atmospheric volume."""
+    for name in ("T2", "U10", "V10", "PSFC", "TSK", "Q2", "RAINC", "RAINNC", "COSALPHA", "SINALPHA"):
+        if name in dataset:
+            dataset[name].load()
+
+
 def _decode_times(dataset: xr.Dataset) -> pd.DatetimeIndex:
     if "Times" in dataset:
         raw = dataset["Times"].values
@@ -60,13 +67,32 @@ def open_wrfout(path: str | Path, *, points: list[tuple[float, float]] | None = 
         ys, xs = zip(*indices)
         dataset = dataset.isel(south_north=slice(min(ys), max(ys) + 1), west_east=slice(min(xs), max(xs) + 1))
         dataset.attrs.update(grid_y_offset=min(ys), grid_x_offset=min(xs))
+        # These surface fields are reused by multiple diagnostics. Cache only
+        # the selected station rectangle, preserving dtype and every time.
+        _load_station_surface(dataset)
     dataset["temperature_2m_c"] = dataset["T2"] - 273.15
     dataset["temperature_2m_c"].attrs.update(units="degC", long_name="2 m air temperature")
     dataset["wind_speed_10m_ms"] = np.hypot(dataset["U10"], dataset["V10"])
     dataset["wind_speed_10m_ms"].attrs.update(units="m s-1", long_name="10 m wind speed")
-    dataset["wind_direction_10m_deg"] = (270 - np.degrees(np.arctan2(dataset["V10"], dataset["U10"]))) % 360
+    if {"COSALPHA", "SINALPHA"}.issubset(dataset.variables):
+        east = dataset["U10"] * dataset["COSALPHA"] - dataset["V10"] * dataset["SINALPHA"]
+        north = dataset["V10"] * dataset["COSALPHA"] + dataset["U10"] * dataset["SINALPHA"]
+        reference = "earth"
+    elif "MAP_PROJ" in dataset.attrs or {"COSALPHA", "SINALPHA"} & set(dataset.variables):
+        source.close()
+        raise WRFOutputError("projected WRF winds require COSALPHA and SINALPHA for earth rotation")
+    else:
+        # Unprojected, minimal input datasets (e.g. synthetic tests).
+        east, north = dataset["U10"], dataset["V10"]
+        reference = "assumed_earth_without_projection_metadata"
+    dataset["eastward_wind_10m_ms"] = east
+    dataset["northward_wind_10m_ms"] = north
+    for name in ("eastward_wind_10m_ms", "northward_wind_10m_ms"):
+        dataset[name].attrs.update(units="m s-1", reference=reference)
+    direction = (270 - np.degrees(np.arctan2(north, east))) % 360
+    dataset["wind_direction_10m_deg"] = direction.where(dataset["wind_speed_10m_ms"] > 0)
     dataset["wind_direction_10m_deg"].attrs.update(
-        units="degree", long_name="10 m meteorological wind direction (from)"
+        units="degree", long_name="10 m meteorological wind direction (from)", reference=reference
     )
     if "PSFC" in dataset:
         dataset["surface_pressure_hpa"] = dataset["PSFC"] / 100

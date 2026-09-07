@@ -5,6 +5,24 @@ import numpy as np
 import pandas as pd
 
 
+def pressure_at_height(pressure_hpa, temperature_k, mixing_ratio, height_difference_m: float):
+    """Hydrostatic short-column reduction using model virtual temperature.
+
+    Positive height_difference_m means an elevated sensor, hence lower pressure.
+    The constant-layer-Tv approximation is restricted to |dz| <= 100 m.
+    Observed pressure/temperature never enter this model-side transformation.
+    """
+    if not np.isfinite(height_difference_m) or abs(height_difference_m) > 100:
+        raise ValueError("pressure height difference requires a finite value within 100 m; use a vertical profile for larger offsets")
+    p, t, r = np.broadcast_arrays(*(np.asarray(value, dtype=np.float64) for value in
+                                   (pressure_hpa, temperature_k, mixing_ratio)))
+    valid = np.isfinite(p) & np.isfinite(t) & np.isfinite(r) & (p > 0) & (t > 0) & (r >= 0)
+    with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+        virtual_temperature = t * (1 + r / .622) / (1 + r)
+        pressure = p * np.exp(-9.80665 * height_difference_m / (287.05 * virtual_temperature))
+    return np.where(valid, pressure, np.nan)
+
+
 def humidity_components(temperature: pd.DataFrame, humidity: pd.DataFrame) -> pd.DataFrame:
     """Decompose RH error at the observed T, retaining actual model values.
 

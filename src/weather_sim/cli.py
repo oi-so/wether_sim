@@ -16,6 +16,7 @@ from weather_sim.analysis.comparison import align_and_evaluate, station_temperat
 from weather_sim.analysis.observation_verification import evaluate_real_observations
 from weather_sim.analysis.spatial import extract_nearest_series
 from weather_sim.analysis.wrf import open_wrfout
+from weather_sim.analysis.stability import audit_case
 from weather_sim.case_operations import (
     animate_case,
     cleanup_candidates,
@@ -115,6 +116,11 @@ def _parser() -> argparse.ArgumentParser:
     case_evaluate.add_argument("--observations", type=Path)
     case_evaluate.add_argument("--output-dir", type=Path)
     case_evaluate.add_argument("--tolerance-minutes", type=float)
+    case_evaluate.add_argument("--station-metadata", type=Path, help="station height/pressure metadata YAML; default: case observations/station_metadata.yaml")
+
+    audit = subparsers.add_parser("audit-case", help="scan saved fields and logs without running WRF")
+    audit.add_argument("case_directory", type=Path)
+    audit.add_argument("--output", type=Path)
 
     cleanup = subparsers.add_parser(
         "cleanup-case",
@@ -372,6 +378,7 @@ def _evaluate_case(args: argparse.Namespace) -> int:
         observations_path=args.observations,
         output_directory=args.output_dir,
         tolerance_minutes=args.tolerance_minutes,
+        station_metadata_path=args.station_metadata,
     )
     if summary.empty:
         raise WeatherSimError("no comparable model/observation pairs were found in the case period")
@@ -414,6 +421,10 @@ def main(argv: list[str] | None = None) -> int:
             return _prepare_observations(args)
         if args.command == "evaluate-case":
             return _evaluate_case(args)
+        if args.command == "audit-case":
+            report = audit_case(args.case_directory, args.output)
+            print(json.dumps({key: report[key] for key in ("case", "wrf_success", "log_counts", "issues")}, indent=2))
+            return 1 if report["issues"] else 0
         if args.command == "cleanup-case":
             return _cleanup_case(args)
     except (WeatherSimError, ValueError, KeyError) as exc:

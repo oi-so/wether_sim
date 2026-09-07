@@ -16,7 +16,8 @@ import xarray as xr
 
 from weather_sim.analysis.metrics import calculate_metrics
 from weather_sim.analysis.spatial import extract_nearest_series
-from weather_sim.analysis.verification_diagnostics import cumulative_intervals, humidity_components
+from weather_sim.analysis.verification_diagnostics import cumulative_intervals, humidity_components, pressure_at_height
+from weather_sim.errors import ObservationDataError
 from weather_sim.observations.csv_reader import convert_temperature_to_celsius
 
 matplotlib.rcParams["font.family"] = ["Hiragino Sans", "DejaVu Sans"]
@@ -37,6 +38,7 @@ VARIABLES = (
     VerificationVariable("relative_humidity", "relative_humidity_2m_percent", "humidity", "相対湿度", "%"),
     VerificationVariable("wind_speed", "wind_speed_10m_ms", "wind_speed", "風速", "m/s"),
     VerificationVariable("pressure", "surface_pressure_hpa", "pressure", "地表気圧", "hPa"),
+    VerificationVariable("pressure", "surface_pressure_hpa", "pressure_sensor_height", "現地気圧（観測高度換算）", "hPa"),
     VerificationVariable("precipitation", "precipitation_interval_mm", "precipitation", "時間降水量", "mm"),
     VerificationVariable("precipitation_accumulated", "precipitation_interval_mm", "precipitation_accumulation_difference", "区間降水量（積算観測差分）", "mm"),
     VerificationVariable("precipitation_rate", "precipitation_rate_mm_h", "precipitation_rate", "降水強度", "mm/h"),
@@ -129,6 +131,7 @@ def evaluate_real_observations(
     start: pd.Timestamp,
     end: pd.Timestamp,
     tolerance: pd.Timedelta,
+    station_metadata: dict[str, dict] | None = None,
 ) -> pd.DataFrame:
     """Evaluate every supported station/variable pair and write auditable products."""
     output = Path(output_directory)
@@ -147,8 +150,14 @@ def evaluate_real_observations(
         latitude = float(station["latitude"].iloc[0])
         longitude = float(station["longitude"].iloc[0])
         elevation = pd.to_numeric(station["elevation_m"], errors="coerce").dropna()
+        metadata = (station_metadata or {}).get(station_id, {})
+        if metadata and (abs(latitude - metadata["latitude"]) > 1e-4 or abs(longitude - metadata["longitude"]) > 1e-4):
+            raise ObservationDataError(f"station metadata coordinates do not match observations: {station_id}")
         station_pairs: dict[str, pd.DataFrame] = {}
         for specification in VARIABLES:
+            height_adjusted = specification.output_name == "pressure_sensor_height"
+            if height_adjusted and (metadata.get("pressure_type") != "station" or not {"T2", "Q2", "HGT"}.issubset(available)):
+                continue
             source_name = (
                 "precipitation_interval_mm"
                 if specification.model_variable == "precipitation_rate_mm_h"
@@ -161,6 +170,15 @@ def evaluate_real_observations(
             observed = rows.set_index("timestamp")["normalized_value"]
             observed.index = pd.to_datetime(observed.index, utc=True)
             model, extracted = _model_series(dataset, specification, latitude, longitude)
+            sensor_elevation = None
+            if height_adjusted:
+                location = dict(south_north=int(extracted.attrs["grid_y"]), west_east=int(extracted.attrs["grid_x"]))
+                height = dataset.HGT.isel(**location)
+                model_height = float(height.isel(Time=0) if "Time" in height.dims else height)
+                sensor_elevation = metadata["ground_elevation_m"] + metadata["pressure_sensor_height_m"]
+                model = pd.Series(pressure_at_height(model.to_numpy(), dataset.T2.isel(**location).values,
+                                                     dataset.Q2.isel(**location).values, sensor_elevation - model_height),
+                                  index=model.index, name="model")
             model = model.loc[(model.index >= start) & (model.index <= end)]
             if specification.observation_variable == 'precipitation_accumulated':
                 if 'precipitation_interval_hours' not in dataset:
@@ -201,7 +219,8 @@ def evaluate_real_observations(
                     "grid_y": grid_y + int(dataset.attrs.get("grid_y_offset", 0)),
                     "grid_x": grid_x + int(dataset.attrs.get("grid_x_offset", 0)),
                     "grid_distance_km": float(extracted.attrs["grid_distance_km"]),
-                    "observation_elevation_m": float(elevation.iloc[0]) if not elevation.empty else None,
+                    "observation_elevation_m": metadata.get("ground_elevation_m", float(elevation.iloc[0]) if not elevation.empty else None),
+                    "pressure_sensor_elevation_m": sensor_elevation,
                     "model_elevation_m": model_elevation,
                 }
             )
@@ -217,6 +236,8 @@ def evaluate_real_observations(
     summary = pd.DataFrame.from_records(records)
     output.mkdir(parents=True, exist_ok=True)
     summary.to_csv(output / "verification_summary.csv", index=False)
+    if station_metadata:
+        (output / "station_metadata.json").write_text(json.dumps(station_metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     pd.DataFrame(moisture_records).to_csv(output / 'moisture_summary.csv', index=False)
     (output / "verification_summary.json").write_text(
         json.dumps(records, ensure_ascii=False, indent=2, allow_nan=True) + "\n",

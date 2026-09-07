@@ -37,8 +37,8 @@ def plot_surface_field(
         step = max(1, min(values.shape) // 20)
         axis.quiver(
             longitude.values[::step, ::step], latitude.values[::step, ::step],
-            dataset["U10"].isel(Time=time_index).values[::step, ::step],
-            dataset["V10"].isel(Time=time_index).values[::step, ::step],
+            dataset["eastward_wind_10m_ms"].isel(Time=time_index).values[::step, ::step],
+            dataset["northward_wind_10m_ms"].isel(Time=time_index).values[::step, ::step],
             color="black", alpha=0.7,
         )
     if center is not None:

@@ -40,3 +40,15 @@ def test_moisture_candidate_changes_only_one_physics_parameter():
     assert b['wrf']['nudging_moisture_s']==5e-5
     b['wrf']['nudging_moisture_s']=a['wrf']['nudging_moisture_s']
     assert a==b
+
+
+def test_pressure_height_reduction_is_reversible_and_handles_missing_data():
+    from weather_sim.analysis.verification_diagnostics import pressure_at_height
+    p = pressure_at_height(1000., 298., .014, 17.423)
+    assert p == pytest.approx(998.02, abs=.02)
+    assert pressure_at_height(p, 298., .014, -17.423) == pytest.approx(1000.)
+    assert pressure_at_height(1000., 298., .014, 0.) == 1000.
+    assert p > pressure_at_height(1000., 298., 0., 17.423)
+    assert np.isnan(pressure_at_height(1000., np.nan, .014, 17.423))
+    with pytest.raises(ValueError, match="within 100 m"):
+        pressure_at_height(1000., 298., .014, 1000.)

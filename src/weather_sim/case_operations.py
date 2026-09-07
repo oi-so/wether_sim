@@ -17,6 +17,7 @@ from weather_sim.errors import ObservationDataError, WeatherSimError, WRFOutputE
 from weather_sim.observations.csv_reader import read_observations
 from weather_sim.observations.jma_download import download_fuchu_amedas_period
 from weather_sim.observations.school_wsn import read_school_wsn
+from weather_sim.observations.station_metadata import read_station_metadata
 from weather_sim.visualization.animation import create_standard_animations
 from weather_sim.visualization.plots import plot_surface_field
 from weather_sim.visualization.volume import VolumeOptions, create_volume_animation
@@ -216,6 +217,7 @@ def evaluate_case(
     observations_path: str | Path | None = None,
     output_directory: str | Path | None = None,
     tolerance_minutes: float | None = None,
+    station_metadata_path: str | Path | None = None,
 ) -> pd.DataFrame:
     """Evaluate d03 over the case target period using a canonical observation CSV."""
     case = load_case(case_directory)
@@ -228,6 +230,8 @@ def evaluate_case(
         observation_file,
         timezone_name=str(case.manifest.get("timezone", "Asia/Tokyo")),
     )
+    metadata_file = Path(station_metadata_path) if station_metadata_path else case.directory / "observations/station_metadata.yaml"
+    metadata = read_station_metadata(metadata_file) if station_metadata_path or metadata_file.is_file() else None
     interval = float(case.manifest.get("output_interval_minutes", 10))
     tolerance = pd.Timedelta(minutes=tolerance_minutes if tolerance_minutes is not None else interval / 2)
     stations = observations.loc[observations["is_valid"], ["latitude", "longitude"]].drop_duplicates()
@@ -245,6 +249,7 @@ def evaluate_case(
             start=case.start,
             end=case.end,
             tolerance=tolerance,
+            station_metadata=metadata,
         )
     finally:
         dataset.close()
