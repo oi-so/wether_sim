@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import shutil
+import json
+from collections.abc import Callable
 import subprocess
 import tarfile
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from weather_sim.config.models import ExperimentConfig
@@ -42,6 +44,7 @@ class PreparedForecastData:
     msm_files: tuple[Path, ...]
     gfs_files: tuple[Path, ...]
     geographic_directory: Path
+    source_selection: dict | None = None
 
 
 def _download(url: str, target: Path) -> Path:
@@ -56,6 +59,9 @@ def _download(url: str, target: Path) -> Path:
         with open_trusted_url(request, timeout=120) as response, temporary.open("wb") as output:
             shutil.copyfileobj(response, output, length=1024 * 1024)
     except (OSError, urllib.error.URLError) as exc:
+        if isinstance(exc, urllib.error.HTTPError) and exc.code == 404:
+            temporary.unlink(missing_ok=True)
+            raise ExternalCommandError(f"download failed (HTTP 404): {url}; data may not be published yet") from exc
         # Some archives do not send the intermediate certificate needed by
         # OpenSSL-based Python builds on macOS. Apple's curl uses the system
         # trust store and still performs full TLS certificate verification.
@@ -68,7 +74,6 @@ def _download(url: str, target: Path) -> Path:
             "--show-error",
             "--retry",
             "4",
-            "--retry-all-errors",
             "--output",
             str(temporary),
             url,
@@ -101,25 +106,120 @@ def _cycle_assignments(
     *,
     cycle_interval_hours: int,
     max_forecast_hours: int,
+    now: datetime | None = None,
+    available: Callable[[datetime, datetime], bool] | None = None,
 ) -> dict[datetime, datetime]:
-    """Assign valid times to supported initialization cycles."""
+    """Reuse published cycles, searching older forecasts when necessary.
+
+    Future valid times are permitted; future initialization times are not.
+    """
     if cycle_interval_hours <= 0 or 24 % cycle_interval_hours:
         raise ValueError("cycle_interval_hours must be a positive divisor of 24")
     if max_forecast_hours < 0:
         raise ValueError("max_forecast_hours must be non-negative")
 
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None or any(t.tzinfo is None for t in valid_times):
+        raise ValueError('forecast selection requires timezone-aware times')
+    now = now.astimezone(timezone.utc)
+    valid_times = tuple(t.astimezone(timezone.utc) for t in valid_times)
+    if list(valid_times) != sorted(set(valid_times)):
+        raise ValueError('valid times must be increasing and unique')
+    if any(t.minute or t.second or t.microsecond for t in valid_times):
+        raise ValueError('forecast valid times must be whole hours')
+    latest_cycle = now.replace(hour=now.hour - now.hour % cycle_interval_hours, minute=0, second=0, microsecond=0)
+    if valid_times and valid_times[-1] > latest_cycle + timedelta(hours=max_forecast_hours):
+        raise ExternalCommandError(
+            f'requested boundary {valid_times[-1].isoformat()} exceeds the supported '
+            f'{max_forecast_hours}-hour forecast range as of {now.isoformat()}; '
+            'shorten the period or wait for newer data (includes spin-up and rounded end boundary)'
+        )
+    checked: dict[tuple[datetime, datetime], bool] = {}
+    def usable(candidate: datetime, valid: datetime) -> bool:
+        key = (candidate, valid)
+        if key not in checked:
+            checked[key] = available(candidate, valid) if available else True
+        return checked[key]
     assignments: dict[datetime, datetime] = {}
     cycle: datetime | None = None
     for valid_time in valid_times:
-        if cycle is None or valid_time - cycle > timedelta(hours=max_forecast_hours):
-            cycle = valid_time.replace(
-                hour=valid_time.hour - valid_time.hour % cycle_interval_hours,
+        if cycle is None or valid_time - cycle > timedelta(hours=max_forecast_hours) or not usable(cycle, valid_time):
+            upper = min(valid_time, now)
+            candidate = upper.replace(
+                hour=upper.hour - upper.hour % cycle_interval_hours,
                 minute=0,
                 second=0,
                 microsecond=0,
             )
+            while valid_time - candidate <= timedelta(hours=max_forecast_hours):
+                if usable(candidate, valid_time):
+                    cycle = candidate
+                    break
+                candidate -= timedelta(hours=cycle_interval_hours)
+            else:
+                raise ExternalCommandError(
+                    f'no published forecast covers boundary {valid_time.isoformat()} '
+                    f'as of {now.isoformat()} (forecast limit {max_forecast_hours} h); '
+                    'data may be unpublished or absent from this archive; shorten the period or retry later'
+                )
         assignments[valid_time] = cycle
     return assignments
+
+
+def _remote_exists(url: str) -> bool:
+    """HEAD only; distinguish absence from connectivity/authentication errors."""
+    request = urllib.request.Request(url, method='HEAD', headers={'User-Agent': 'weather-sim/0.1'})
+    try:
+        with open_trusted_url(request, timeout=20) as response:
+            if response.status != 200:
+                raise ExternalCommandError(f'availability check failed (HTTP {response.status}): {url}')
+            return response.headers.get('Content-Length') != '0'
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return False
+        raise ExternalCommandError(f'availability check failed (HTTP {exc.code}): {url}') from exc
+    except (OSError, urllib.error.URLError):
+        result = subprocess.run(['curl', '--head', '--location', '--silent', '--show-error',
+                                 '--max-time', '20', '--output', '/dev/null', '--write-out', '%{http_code}', url],
+                                text=True, capture_output=True, check=False)
+        if result.returncode:
+            raise ExternalCommandError(f'availability check connection failed: {url}: {result.stderr.strip()}')
+        status = result.stdout.strip()
+        if status in ('200', '404'):
+            return status == '200'
+        raise ExternalCommandError(f'availability check failed (HTTP {status}): {url}')
+
+
+def _gfs_paths(cycle: datetime, valid: datetime, root: Path) -> tuple[str, Path]:
+    hour = int((valid - cycle).total_seconds() // 3600)
+    url = f'{GFS_ROOT}/gfs.{cycle:%Y%m%d}/{cycle:%H}/atmos/gfs.t{cycle:%H}z.sfluxgrbf{hour:03d}.grib2'
+    target = root / valid.strftime('%Y-%m-%d') / f'gfs_surface_soil_{valid:%Y%m%d_%H%M}_from_{cycle:%Y%m%d_%H%M}.grib2'
+    return url, target
+
+
+def select_forecast_cycles(valid_times: tuple[datetime, ...], root: Path, model: str,
+                           *, now: datetime | None = None) -> dict[datetime, datetime]:
+    """Check publication/local cache before downloading; memoize HEAD requests."""
+    if model not in ('msm', 'gfs'):
+        raise ValueError('model must be msm or gfs')
+    checks: dict[str, bool] = {}
+    def exists(url: str, path: Path | None = None) -> bool:
+        if path is not None and path.is_file() and path.stat().st_size:
+            return True
+        if url not in checks:
+            checks[url] = _remote_exists(url)
+        return checks[url]
+    def available(cycle: datetime, valid: datetime) -> bool:
+        if model == 'msm':
+            return all(exists(f'{RISH_ROOT}/{cycle:%Y/%m/%d}/{name}', root / cycle.strftime('%Y-%m-%d') / name)
+                       for name in _msm_names(cycle))
+        url, target = _gfs_paths(cycle, valid, root)
+        if target.is_file() and target.stat().st_size:
+            return True
+        return exists(url + '.idx') and exists(url)
+    return _cycle_assignments(valid_times, cycle_interval_hours=3 if model == 'msm' else 6,
+                              max_forecast_hours=15 if model == 'msm' else 120,
+                              now=now, available=available)
 
 
 def _msm_names(cycle: datetime) -> tuple[str, str]:
@@ -186,13 +286,11 @@ def download_msm(
     root: Path,
     grib_copy: str = "grib_copy",
     grib_set: str = "grib_set",
+    *, assignments: dict[datetime, datetime] | None = None,
 ) -> tuple[Path, ...]:
     # JMA MSM archives provide 3-hourly cycles with FH00-15 in these files.
-    assignments = _cycle_assignments(
-        valid_times,
-        cycle_interval_hours=3,
-        max_forecast_hours=15,
-    )
+    if assignments is None:
+        assignments = select_forecast_cycles(valid_times, root, 'msm')
     cycle_files: dict[datetime, tuple[Path, Path]] = {}
     for cycle in sorted(set(assignments.values())):
         directory = root / cycle.strftime("%Y-%m-%d")
@@ -290,9 +388,11 @@ def _download_gfs_ranges(url: str, target: Path, ranges: list[tuple[int, int | N
                                 )
                             shutil.copyfileobj(response, output, length=1024 * 1024)
                         break
-                    except (OSError, urllib.error.URLError, ExternalCommandError):
+                    except (OSError, urllib.error.URLError, ExternalCommandError) as exc:
                         output.seek(output_position)
                         output.truncate()
+                        if isinstance(exc, urllib.error.HTTPError) and exc.code == 404:
+                            raise
                         if attempt == 3:
                             raise
                         time.sleep(2**attempt)
@@ -305,27 +405,16 @@ def _download_gfs_ranges(url: str, target: Path, ranges: list[tuple[int, int | N
     return target
 
 
-def download_gfs(valid_times: tuple[datetime, ...], root: Path) -> tuple[Path, ...]:
+def download_gfs(valid_times: tuple[datetime, ...], root: Path, *,
+                 assignments: dict[datetime, datetime] | None = None) -> tuple[Path, ...]:
     # Operational GFS cycles are 00/06/12/18 UTC. Keep one cycle for a
     # typical local case to avoid discontinuities between soil forecasts.
-    assignments = _cycle_assignments(
-        valid_times,
-        cycle_interval_hours=6,
-        max_forecast_hours=120,
-    )
+    if assignments is None:
+        assignments = select_forecast_cycles(valid_times, root, 'gfs')
     prepared: list[Path] = []
     for valid_time in valid_times:
         cycle = assignments[valid_time]
-        forecast_hour = int((valid_time - cycle).total_seconds() // 3600)
-        base = (
-            f"{GFS_ROOT}/gfs.{cycle:%Y%m%d}/{cycle:%H}/atmos/"
-            f"gfs.t{cycle:%H}z.sfluxgrbf{forecast_hour:03d}.grib2"
-        )
-        target = (
-            root
-            / valid_time.strftime("%Y-%m-%d")
-            / f"gfs_surface_soil_{valid_time:%Y%m%d_%H%M}_from_{cycle:%Y%m%d_%H%M}.grib2"
-        )
+        base, target = _gfs_paths(cycle, valid_time, root)
         if target.is_file() and target.stat().st_size:
             prepared.append(target)
             continue
@@ -353,13 +442,22 @@ def ensure_geographic_data(root: Path) -> Path:
 
 def prepare_forecast_data(config: ExperimentConfig, project_root: Path) -> PreparedForecastData:
     valid_times = _three_hour_times(config)
+    now = datetime.now(timezone.utc)
+    roots = {model: project_root / 'data/meteorological' / model for model in ('msm', 'gfs')}
+    assignments = {model: select_forecast_cycles(valid_times, root, model, now=now) for model, root in roots.items()}
+    selection = {'selected_at_utc': now.isoformat(), 'models': {
+        model: [{'valid_time_utc': valid.isoformat(), 'initialization_utc': cycle.isoformat(),
+                 'forecast_hours': int((valid - cycle).total_seconds() / 3600)} for valid, cycle in mapping.items()]
+        for model, mapping in assignments.items()}}
+    print('Published input cycles: ' + json.dumps(selection['models']))
     geographic = ensure_geographic_data(project_root / "data/geographic")
     if config.wrf.urban_fraction_source == 'gaia2020':
         from weather_sim.data.urban import urban_geographic_overlay
         geographic = urban_geographic_overlay(project_root / "data/geographic", geographic, _download)
     return PreparedForecastData(
         valid_times=valid_times,
-        msm_files=download_msm(valid_times, project_root / "data/meteorological/msm"),
-        gfs_files=download_gfs(valid_times, project_root / "data/meteorological/gfs"),
+        msm_files=download_msm(valid_times, roots['msm'], assignments=assignments['msm']),
+        gfs_files=download_gfs(valid_times, roots['gfs'], assignments=assignments['gfs']),
         geographic_directory=geographic,
+        source_selection=selection,
     )

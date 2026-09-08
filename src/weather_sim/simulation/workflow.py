@@ -326,6 +326,7 @@ def run_case(
             (case_directory / "observations_warning.txt").write_text(str(exc) + "\n", encoding="utf-8")
     print("Preparing date-matched MSM, GFS, and geographic inputs")
     data = prepare_forecast_data(config, project_root)
+    (case_directory / "forecast_sources.json").write_text(json.dumps(data.source_selection, indent=2) + "\n")
     if download_only:
         return case_directory
     wps = _prepare_wps(config, project_root, case_directory, data, use_metgrid_cache=use_metgrid_cache)
