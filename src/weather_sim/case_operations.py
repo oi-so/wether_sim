@@ -98,6 +98,8 @@ def animate_case(
     fps: int | None = None,
     dimension: str = 'both',
     volume_options: VolumeOptions | None = None,
+    domains: tuple[str, ...] = ('d03', 'd02', 'd01'),
+    basemap: bool = True,
 ) -> dict[str, Path]:
     """Create only missing standard animations unless ``force`` is requested."""
     case = load_case(case_directory)
@@ -105,41 +107,56 @@ def animate_case(
         raise ValueError('dimension must be 2d, 3d, or both')
     extension = suffix or str(case.manifest.get("animation_format", "mp4"))
     frame_rate = fps or int(case.manifest.get("animation_fps", 6))
-    dataset, analysis = _target_dataset(case)
-    try:
-        output = case.directory / "analysis"
+    created: dict[str, Path] = {}
+    if not domains or len(set(domains)) != len(domains) or set(domains) - {'d01', 'd02', 'd03'}:
+        raise ValueError('domains must be unique d01/d02/d03 values')
+    available_domains = tuple(d for d in ('d03', 'd02', 'd01') if list((case.directory / 'wrf_run').glob(f'wrfout_{d}_*')))
+    map_cache = Path(project_root).resolve() / 'data/geographic/gsi_tiles' if basemap else None
+    outputs = {}
+    for domain in domains:
+        files = sorted((case.directory / 'wrf_run').glob(f'wrfout_{domain}_*'))
+        if len(files) != 1:
+            raise WRFOutputError(f'{domain}: expected one wrfout, found {len(files)}')
+        outputs[domain] = files[0]
+    for domain in domains:
+        output = case.directory / 'analysis'
+        if domain != 'd03':
+            output /= domain
         output.mkdir(parents=True, exist_ok=True)
-        map_path = output / "temperature_map.png"
-        created: dict[str, Path] = {}
-        if dimension in {'3d', 'both'}:
-            target = output / 'atmosphere_3d.html'
-            if force or not target.is_file() or target.stat().st_size == 0:
-                created['atmosphere_3d'] = create_volume_animation(
-                    analysis, target, center=(case.latitude, case.longitude),
-                    radius_km=float(case.manifest.get('analysis_radius_km', 20)), options=volume_options,
+        links = {d: ('' if d == 'd03' else d + '/') + 'atmosphere_3d.html' for d in available_domains}
+        if domain != 'd03':
+            links = {d: '../' + path for d, path in links.items()}
+        dataset = open_wrfout(outputs[domain])
+        try:
+            # Parent output can land one parent step after its nominal clock time.
+            tolerance = pd.Timedelta(seconds=case.manifest.get('configuration', {}).get('wrf', {}).get('time_step_seconds', 54))
+            analysis = dataset.sel(Time=slice(case.start, case.end + (tolerance if domain != 'd03' else pd.Timedelta(0))))
+            if not analysis.sizes.get('Time', 0):
+                raise WRFOutputError(f'{domain}: no analysis frames')
+            if dimension in {'3d', 'both'}:
+                target = output / 'atmosphere_3d.html'
+                if force or not target.is_file() or target.stat().st_size == 0:
+                    created[f'{domain}_atmosphere_3d'] = create_volume_animation(
+                        analysis, target, center=(case.latitude, case.longitude), radius_km=None,
+                        options=volume_options,
+                        basemap_cache=map_cache,
+                        domain_links=links,
+                    )
+            if dimension in {'2d', 'both'}:
+                map_path = output / 'temperature_map.png'
+                if force or not map_path.is_file():
+                    plot_surface_field(analysis, map_path, center=(case.latitude, case.longitude),
+                                       radius_km=float(case.manifest.get('analysis_radius_km', 20)))
+                    created[f'{domain}_temperature_map'] = map_path
+                movies = create_standard_animations(
+                    analysis, output, suffix=extension, fps=frame_rate,
+                    basemap_cache=map_cache,
+                    center=(case.latitude, case.longitude), skip_existing=not force,
                 )
-        if dimension == '3d':
-            return created
-        if force or not map_path.is_file():
-            plot_surface_field(
-                analysis,
-                map_path,
-                center=(case.latitude, case.longitude),
-                radius_km=float(case.manifest.get("analysis_radius_km", 20)),
-            )
-            created["temperature_map"] = map_path
-        created.update(create_standard_animations(
-            analysis,
-            output,
-            suffix=extension,
-            fps=frame_rate,
-            basemap_cache=Path(project_root).resolve() / "data/geographic/gsi_tiles",
-            center=(case.latitude, case.longitude),
-            skip_existing=not force,
-        ))
-        return created
-    finally:
-        dataset.close()
+                created.update({f'{domain}_{name}': path for name, path in movies.items()})
+        finally:
+            dataset.close()
+    return created
 
 
 def _canonical_frame(path: Path, timezone_name: str) -> pd.DataFrame:

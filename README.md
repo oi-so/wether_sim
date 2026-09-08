@@ -2,7 +2,7 @@
 
 現在時刻とMSM/GFSの公開状況を確認して予報を選ぶよう修正しました。未来開始の条件と検証時間帯の例は[入力データの公開確認](docs/forecast_availability.md)を参照してください。
 
-地形付き3Dアニメーションと雲の2D動画6種類を追加しました。既存結果へ `./scripts/animate_weather_case.sh output/old` を実行すると不足分だけ生成します。操作と気象量の定義は [3D・雲動画マニュアル](docs/animation_3d.md) を参照してください。
+9 km・3 km・1 kmの全領域で動画と地図付き3D/2D HTMLを出力します。既存結果の更新は `./scripts/animate_weather_case.sh CASE --force`（WRF再計算なし）。自由な回転・中心移動、滑らかなメッシュ、地表13項目、白い雲・レーダー風の雨色に対応しました。[操作と出力先](docs/animation_3d.md) を参照してください。
 
 2026-09-08更新：`run-case` の既定設定は `config/msm_guided.yaml`（MSMナッジング、親領域60分出力）です。水蒸気強化は気温を悪化させ、太陽高度による短波補間の気温改善は約0.3%でした。[最新評価と都市面の見直し](docs/evaluation_20260908.md)を参照してください。新しい未検証候補は `--template config/msm_guided_urban.yaml`（Noah＋SLUCM、GAIA 2020都市被覆率）です。初回は約30 MBの追加データを取得し、別の地理データ領域に約1.87 GB展開します。既存地理データを変更せず、都市率が入力されたことを検査します。
 
@@ -250,7 +250,9 @@ GFSの土壌場は、空間切り出し後のGRIB2ではなく、NOAA全球フ�
 - `analysis/temperature_animation.mp4`: d03の2 m気温
 - `analysis/wind_animation.mp4`: 10 m風速と風ベクトル
 - `analysis/humidity_animation.mp4`: 2 m相対湿度
-- `analysis/precipitation_animation.mp4`: 出力間隔ごとの降水量
+- `analysis/precipitation_animation.mp4`: 実出力間隔から換算した平均降水強度（mm/h）
+- `analysis/precipitation_interval_animation.mp4`: 実出力間隔ごとの降水量（mm）
+- `analysis/d02/`・`analysis/d01/`: 3 km・9 kmの同名動画と `atmosphere_3d.html`。d03は従来どおり `analysis/` 直下
 - `analysis/pressure_animation.mp4`: 地表気圧
 - `analysis/skin_temperature_animation.mp4`: 地表面温度
 - `analysis/temperature_map.png`: 気温分布図

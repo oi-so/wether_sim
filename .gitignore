@@ -27,3 +27,5 @@ output/**
 !output/.gitkeep
 *.mp4
 *.gif
+
+data/observations/**

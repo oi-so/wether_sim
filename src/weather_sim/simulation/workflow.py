@@ -21,9 +21,7 @@ from weather_sim.observations.jma_download import download_fuchu_amedas
 from weather_sim.simulation.namelists import write_namelists
 from weather_sim.simulation.runtime_cache import cache_thompson_tables, restore_thompson_tables
 from weather_sim.simulation.metgrid_cache import input_signature, cache_key, restore_metgrid, publish_metgrid
-from weather_sim.visualization.animation import create_standard_animations
 from weather_sim.visualization.plots import plot_surface_field
-from weather_sim.visualization.volume import create_volume_animation
 
 
 def default_case_name(config: ExperimentConfig) -> str:
@@ -246,18 +244,9 @@ def _visualize(config: ExperimentConfig, run_directory: Path, case_directory: Pa
             radius_km=config.analysis.radius_km,
         )
         if config.visualization.animation:
-            create_volume_animation(
-                analysis, output / 'atmosphere_3d.html',
-                center=(config.center.latitude, config.center.longitude), radius_km=config.analysis.radius_km,
-            )
-            create_standard_animations(
-                analysis,
-                output,
-                suffix=config.visualization.animation_format,
-                fps=config.visualization.fps,
-                basemap_cache=run_directory.parents[2] / "data/geographic/gsi_tiles",
-                center=(config.center.latitude, config.center.longitude),
-            )
+            from weather_sim.case_operations import animate_case
+            animate_case(case_directory, run_directory.parents[2], force=True,
+                         suffix=config.visualization.animation_format, fps=config.visualization.fps)
         return output
     finally:
         dataset.close()

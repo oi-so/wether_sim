@@ -89,6 +89,8 @@ def _parser() -> argparse.ArgumentParser:
     animate.add_argument("--force", action="store_true", help="overwrite animations that already exist")
     animate.add_argument("--format", choices=("mp4", "gif"), dest="animation_format")
     animate.add_argument("--fps", type=int)
+    animate.add_argument('--domains', nargs='+', choices=('d01','d02','d03'), default=['d03','d02','d01'], help='domains to export (default: all three)')
+    animate.add_argument('--no-basemap', action='store_true', help='offline export without external map tiles')
     animate.add_argument('--dimension', choices=('2d', '3d', 'both'), default='both')
     animate.add_argument('--horizontal-stride', type=int, default=3, help='3D horizontal display sampling')
     animate.add_argument('--vertical-stride', type=int, default=2, help='3D vertical display sampling')
@@ -347,6 +349,8 @@ def _animate_case(args: argparse.Namespace) -> int:
         suffix=args.animation_format,
         fps=args.fps,
         dimension=args.dimension,
+        domains=tuple(args.domains),
+        basemap=not args.no_basemap,
         volume_options=VolumeOptions(args.horizontal_stride, args.vertical_stride, args.time_stride, args.max_height_km),
     )
     if created:

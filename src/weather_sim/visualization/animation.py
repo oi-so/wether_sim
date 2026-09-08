@@ -14,7 +14,7 @@ import pandas as pd
 import xarray as xr
 
 from weather_sim.visualization.basemap import add_gsi_basemap
-from weather_sim.analysis.atmosphere import CLOUD_REQUIRED, cloud_columns
+from weather_sim.visualization.fields import SURFACE_FIELDS, surface_fields, radar_style
 
 matplotlib.rcParams["font.family"] = ["Hiragino Sans", "DejaVu Sans"]
 matplotlib.rcParams["axes.unicode_minus"] = False
@@ -83,18 +83,20 @@ def create_field_animation(
     )
     if basemap_cache is not None:
         add_gsi_basemap(axis, extent, basemap_cache)
+    style = dict(vmin=vmin, vmax=vmax, cmap=cmap)
+    if cmap == 'radar':
+        palette, norm = radar_style()
+        style = dict(cmap=palette, norm=norm)
     mesh = axis.pcolormesh(
         longitude,
         latitude,
         field.isel(Time=0),
         shading="auto",
-        cmap=cmap,
-        vmin=vmin,
-        vmax=vmax,
+        **style,
         alpha=0.62 if basemap_cache is not None else 1.0,
         zorder=1,
     )
-    figure.colorbar(mesh, ax=axis, label=label)
+    figure.colorbar(mesh, ax=axis, label=label, **({'boundaries': [0,1,5,10,20,30,50,80], 'extend': 'max', 'ticks': [0,1,5,10,20,30,50,80], 'spacing': 'uniform'} if cmap == 'radar' else {}))
     timestamp_title = axis.set_title("")
     axis.set(xlabel="経度", ylabel="緯度")
     if center is not None:
@@ -127,7 +129,7 @@ def create_field_animation(
         timestamp = timestamp.tz_localize("UTC") if timestamp.tzinfo is None else timestamp.tz_convert("UTC")
         timestamp = timestamp.tz_convert("Asia/Tokyo")
         timestamp = timestamp.strftime("%Y年%m月%d日 %H:%M JST")
-        timestamp_title.set_text(f"{title} — {timestamp}")
+        timestamp_title.set_text(f"{title} · d{int(dataset.attrs.get('GRID_ID', 3)):02d} ({float(dataset.attrs.get('DX', 1000)) / 1000:g} km) — {timestamp}")
         artists: list[object] = [mesh, timestamp_title]
         if quiver is not None:
             quiver.set_UVC(
@@ -189,22 +191,8 @@ def create_standard_animations(
         or (output / f'{name}_animation.{suffix}').stat().st_size == 0
         for name in cloud_names
     )
-    if CLOUD_REQUIRED.issubset(dataset.variables) and (not skip_existing or cloud_pending):
-        dataset = dataset.assign(cloud_columns(dataset))
-    specifications = (
-        ("temperature", "temperature_2m_c", "高度2 m 気温（°C）", "高度2 m 気温", "turbo", None, False, False),
-        ("wind", "wind_speed_10m_ms", "高度10 m 風速（m/s）", "高度10 m 風向・風速", "viridis", None, True, True),
-        ("humidity", "relative_humidity_2m_percent", "高度2 m 相対湿度（%）", "高度2 m 相対湿度", "YlGnBu", (0.0, 100.0), False, False),
-        ("precipitation", "precipitation_interval_mm", "時間降水量（mm/出力間隔）", "時間降水量", "Blues", None, True, False),
-        ("pressure", "surface_pressure_hpa", "地表気圧（hPa）", "地表気圧", "coolwarm", None, False, False),
-        ("skin_temperature", "skin_temperature_c", "地表面温度（°C）", "地表面温度", "inferno", None, False, False),
-        ('cloud_total', 'cloud_total', '総雲量（%）', '総雲量・最大ランダム重なり', 'Blues', (0., 100.), False, False),
-        ('cloud_low', 'cloud_low', '下層雲量（%）', '下層雲量・地上300〜2000 m', 'Blues', (0., 100.), False, False),
-        ('cloud_mid', 'cloud_mid', '中層雲量（%）', '中層雲量・地上2000〜6000 m', 'Blues', (0., 100.), False, False),
-        ('cloud_high', 'cloud_high', '上層雲量（%）', '上層雲量・地上6000 m以上', 'Blues', (0., 100.), False, False),
-        ('cloud_water_path', 'cloud_water_path', '雲水鉛直積算量（kg/m²）', '雲水鉛直積算量（雨水を除く）', 'YlGnBu', None, True, False),
-        ('cloud_ice_path', 'cloud_ice_path', '雲氷鉛直積算量（kg/m²）', '雲氷鉛直積算量（雪・霰を除く）', 'PuBu', None, True, False),
-    )
+    dataset = surface_fields(dataset, include_clouds=not skip_existing or cloud_pending)
+    specifications = SURFACE_FIELDS
     created: dict[str, Path] = {}
     for name, variable, label, title, cmap, limits, zero_based, vectors in specifications:
         if variable not in dataset:

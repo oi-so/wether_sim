@@ -85,3 +85,33 @@ def add_gsi_basemap(axis, extent: tuple[float, float, float, float], cache: str 
         bbox={"facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
         zorder=5,
     )
+
+
+def terrain_texture(latitude, longitude, cache: str | Path) -> dict:
+    """Embed a bounded-size GSI mosaic and exact Web-Mercator texture coordinates."""
+    import base64
+    import numpy as np
+
+    lat, lon = np.asarray(latitude), np.asarray(longitude)
+    west, east, south, north = float(lon.min()), float(lon.max()), float(lat.min()), float(lat.max())
+    zoom = _zoom_for_extent(west, east)
+    while True:
+        xmin, xmax = _tile_x(west, zoom), _tile_x(east, zoom)
+        ymin, ymax = _tile_y(north, zoom), _tile_y(south, zoom)
+        if (xmax-xmin+1)*(ymax-ymin+1) <= 64 or zoom <= 5:
+            break
+        zoom -= 1
+    mosaic = Image.new('RGB', ((xmax-xmin+1)*256, (ymax-ymin+1)*256))
+    for x in range(xmin, xmax+1):
+        for y in range(ymin, ymax+1):
+            mosaic.paste(_tile_image(Path(cache), zoom, x, y), ((x-xmin)*256, (y-ymin)*256))
+    mosaic.thumbnail((2048, 2048), Image.Resampling.LANCZOS)
+    stream = io.BytesIO()
+    mosaic.save(stream, format='JPEG', quality=88)
+    mercator_y = (1 - np.arcsinh(np.tan(np.deg2rad(np.clip(lat, -85.05112878, 85.05112878)))) / np.pi) / 2 * 2**zoom
+    u = ((lon+180)/360*2**zoom-xmin)/(xmax-xmin+1)
+    v = (mercator_y-ymin)/(ymax-ymin+1)
+    return dict(image='data:image/jpeg;base64,'+base64.b64encode(stream.getvalue()).decode('ascii'),
+                uv=base64.b64encode(np.stack([u,v], axis=-1).astype('<f4').tobytes()).decode('ascii'),
+                zoom=zoom, pixels=list(mosaic.size), attribution='地理院タイル（国土地理院）',
+                attribution_url='https://maps.gsi.go.jp/development/ichiran.html')

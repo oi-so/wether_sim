@@ -12,6 +12,8 @@ import xarray as xr
 
 from weather_sim.analysis.atmosphere import VOLUME_REQUIRED, require_variables, volume_frame
 from weather_sim.analysis.spatial import haversine_km
+from weather_sim.visualization.basemap import terrain_texture
+from weather_sim.visualization.fields import SURFACE_FIELDS, surface_fields, field_limits, RAIN_BOUNDS, RAIN_COLORS
 
 
 @dataclass(frozen=True)
@@ -34,19 +36,20 @@ def _packed(array: object) -> str:
 
 def create_volume_animation(
     dataset: xr.Dataset, output_path: str | Path, *, center: tuple[float, float],
-    radius_km: float = 20, options: VolumeOptions | None = None,
+    radius_km: float | None = 20, options: VolumeOptions | None = None,
+    basemap_cache: str | Path | None = None, domain_links: dict[str, str] | None = None,
 ) -> Path:
     """All time frames are embedded; only display sampling changes the data size."""
     options = options or VolumeOptions()
     require_variables(dataset, VOLUME_REQUIRED)
-    if not np.isfinite(radius_km) or radius_km <= 0:
+    if radius_km is not None and (not np.isfinite(radius_km) or radius_km <= 0):
         raise ValueError('3D radius must be positive')
     if dataset.sizes.get('Time', 0) == 0:
         raise ValueError('3D animation needs at least one time')
     first = dataset.isel(Time=0)
     lat, lon = np.asarray(first.XLAT), np.asarray(first.XLONG)
     distances = haversine_km(lat, lon, *center)
-    ys, xs = np.where(distances <= radius_km)
+    ys, xs = np.where(np.ones_like(distances, dtype=bool) if radius_km is None else distances <= radius_km)
     if not len(ys):
         raise ValueError('3D analysis area does not intersect the WRF grid')
     y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
@@ -90,21 +93,40 @@ def create_volume_animation(
     timestamps = [pd.Timestamp(cut.Time.values[i]).tz_localize('UTC')
                   if pd.Timestamp(cut.Time.values[i]).tzinfo is None else pd.Timestamp(cut.Time.values[i])
                   for i in time_indices]
+    surface = surface_fields(cut)
+    surface_data, surface_meta, surface_scales, palettes = {}, {}, {}, {}
+    for name, variable, label, title, palette, limits, zero_based, vectors in SURFACE_FIELDS:
+        if variable not in surface:
+            continue
+        values = surface[variable].isel(Time=time_indices).values
+        surface_data[name] = _packed(values)
+        surface_meta[name] = [title, label]
+        surface_scales[name] = field_limits(values, limits, zero_based)
+        palettes[name] = palette
+    for name, variable in [('east', 'eastward_wind_10m_ms'), ('north', 'northward_wind_10m_ms')]:
+        if variable in surface:
+            surface_data[name] = _packed(surface[variable].isel(Time=time_indices).values)
+    texture = terrain_texture(lat, lon, basemap_cache) if basemap_cache is not None else None
     payload = dict(
         shape=list(shape), fields={key: _packed(value) for key, value in arrays_stacked.items()},
         xy=[_packed(x[::hs, ::hs]), _packed(y[::hs, ::hs])],
         latlon=[_packed(lat[::hs, ::hs]), _packed(lon[::hs, ::hs])],
-        terrain=dict(shape=list(ground.shape), x=_packed(x), y=_packed(y), z=_packed(ground)),
-        times=[t.tz_convert('Asia/Tokyo').strftime('%Y/%m/%d %H:%M JST') for t in timestamps],
-        variables=metadata, scales=scales, options=asdict(options), center=list(center), radius_km=radius_km,
+        terrain=dict(shape=list(ground.shape), x=_packed(x), y=_packed(y), z=_packed(ground),
+                     lat=_packed(lat), lon=_packed(lon), texture=texture),
+        surface=dict(fields=surface_data, variables=surface_meta, scales=surface_scales, palettes=palettes),
+        radar=dict(bounds=RAIN_BOUNDS, colors=RAIN_COLORS), domain_links=domain_links or {},
+        full_domain=radius_km is None, dx_km=float(dataset.attrs.get('DX', 1000))/1000,
+        times=[t.tz_convert('Asia/Tokyo').strftime('%Y/%m/%d %H:%M:%S JST') for t in timestamps],
+        variables=metadata, scales=scales, options=asdict(options), center=list(center), radius_km=float(max(np.ptp(x), np.ptp(y))/2) if radius_km is None else radius_km,
         source_domain=f"d{int(dataset.attrs.get('GRID_ID', 3)):02d}",
     )
     target = Path(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
     template = Path(__file__).with_name('volume_viewer.html').read_text(encoding='utf-8')
     target.write_text(template.replace('__WRF_DATA__', json.dumps(payload, ensure_ascii=False).replace('</', '<\\/')), encoding='utf-8')
-    manifest = {key: value for key, value in payload.items() if key not in {'fields', 'xy', 'latlon', 'terrain'}}
+    manifest = {key: value for key, value in payload.items() if key not in {'fields', 'xy', 'latlon', 'terrain', 'surface'}}
     manifest.update(file=target.name, bytes=target.stat().st_size, terrain_shape=list(ground.shape),
-                    method='native mass levels; instantaneous vectors; display-only decimation; local tangent east/north km')
+                    surface_variables=surface_meta, map_zoom=texture['zoom'] if texture else None,
+                    method='connected native mass-layer triangles; display-only interpolation; surface native grid; local tangent east/north km')
     target.with_suffix('.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     return target
