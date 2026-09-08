@@ -115,6 +115,7 @@ def create_volume_animation(
                      lat=_packed(lat), lon=_packed(lon), texture=texture),
         surface=dict(fields=surface_data, variables=surface_meta, scales=surface_scales, palettes=palettes),
         radar=dict(bounds=RAIN_BOUNDS, colors=RAIN_COLORS), domain_links=domain_links or {},
+        interval_hours=[float(v) if np.isfinite(v) else None for v in cut.precipitation_interval_hours.isel(Time=time_indices).values] if 'precipitation_interval_hours' in cut else None,
         full_domain=radius_km is None, dx_km=float(dataset.attrs.get('DX', 1000))/1000,
         times=[t.tz_convert('Asia/Tokyo').strftime('%Y/%m/%d %H:%M:%S JST') for t in timestamps],
         variables=metadata, scales=scales, options=asdict(options), center=list(center), radius_km=float(max(np.ptp(x), np.ptp(y))/2) if radius_km is None else radius_km,

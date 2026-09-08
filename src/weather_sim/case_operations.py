@@ -124,6 +124,7 @@ def animate_case(
             output /= domain
         output.mkdir(parents=True, exist_ok=True)
         links = {d: ('' if d == 'd03' else d + '/') + 'atmosphere_3d.html' for d in available_domains}
+        links['combined'] = 'atmosphere_combined.html'
         if domain != 'd03':
             links = {d: '../' + path for d, path in links.items()}
         dataset = open_wrfout(outputs[domain])
@@ -156,6 +157,13 @@ def animate_case(
                 created.update({f'{domain}_{name}': path for name, path in movies.items()})
         finally:
             dataset.close()
+    if dimension in {'3d', 'both'}:
+        from weather_sim.visualization.composite import create_composite_animation
+        base = case.directory / 'analysis'
+        sources = [base / 'd01/atmosphere_3d.html', base / 'd02/atmosphere_3d.html', base / 'atmosphere_3d.html']
+        target = base / 'atmosphere_combined.html'
+        if all(p.is_file() for p in sources) and (force or not target.is_file()):
+            created['combined_atmosphere_3d'] = create_composite_animation(sources, target)
     return created
 
 

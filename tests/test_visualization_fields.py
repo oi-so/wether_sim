@@ -102,4 +102,4 @@ def test_case_exports_each_domain_and_keeps_parent_end_step(monkeypatch,tmp_path
         assert kwargs['radius_km'] is None
         assert kwargs['basemap_cache'] is None
         assert path.parent==root/'analysis'/(domain if domain!='d03' else '')
-        assert set(kwargs['domain_links'])=={'d01','d02','d03'}
+        assert set(kwargs['domain_links'])=={'d01','d02','d03','combined'}

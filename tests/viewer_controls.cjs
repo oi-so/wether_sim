@@ -41,3 +41,14 @@ nodes.get('frame').value='1';nodes.get('frame').oninput();flush();assert.equal(e
 nodes.get('mode').value='3d';nodes.get('mode').onchange();flush();assert(evalCode('state.elevation')<0,'3D viewpoint restored');
 nodes.get('renderMode').value='points';nodes.get('renderMode').onchange();flush();assert.equal(evalCode('geometry.length/6'),12);
 console.log('PASS: mesh topology, all 13 surface fields, frame change, unrestricted orbit, pan, two-pointer pinch, cancellation, mode/viewpoint restore, point mode. GPU rendering is not exercised.');
+// Floor remains a rendered object when relief is disabled, independently of map.
+nodes.get('terrain').onclick();flush();assert.equal(evalCode('state.terrain'),false);
+assert(evalCode('Array.from(floorGeometry).filter((_,i)=>i%6===2).every(z=>z===0)'));
+calls.length=0;nodes.get('mapToggle').onclick();flush();assert.equal(evalCode('state.map'),false);assert(calls[0][2]>0,'0 m floor is still drawn');
+nodes.get('mode').value='2d';nodes.get('mode').onchange();nodes.get('reset').onclick();
+nodes.get('fields').children.find(b=>b.dataset.field==='wind').onclick();nodes.get('windScale').value='1';nodes.get('windScale').oninput();flush();
+const span1=evalCode('(()=>{const a=Array.from(windGlyphs(geometry,0)).filter((_,i)=>i%6===0);return Math.max(...a)-Math.min(...a)})()');
+nodes.get('windScale').value='4';nodes.get('windScale').oninput();flush();
+const span2=evalCode('(()=>{const a=Array.from(windGlyphs(geometry,0)).filter((_,i)=>i%6===0);return Math.max(...a)-Math.min(...a)})()');
+assert(span2>span1,'wind size control enlarges billboard arrow triangles');
+console.log('PASS: independent map switch, 0 m floor, wind size control and filled arrows.');
