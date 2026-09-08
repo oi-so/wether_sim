@@ -195,16 +195,21 @@ def _validate_metgrid_inputs(
     config: ExperimentConfig,
 ) -> None:
     """Check every domain/input time before launching real.exe or WRF."""
-    from weather_sim.simulation.input_validation import validate_metgrid_file
+    from weather_sim.simulation.input_validation import validate_metgrid_file, validate_urban_fraction_file
 
     times = pd.date_range(config.simulation_start_utc, config.simulation_end_utc,
                           freq=pd.Timedelta(seconds=config.wrf.input_interval_seconds))
+    urban_checks = []
     for timestamp in times:
         for domain in range(1, len(config.domains) + 1):
             path = wps_directory / f"met_em.d{domain:02d}.{timestamp:%Y-%m-%d_%H:%M:%S}.nc"
             if not path.is_file():
                 raise ExternalCommandError(f"metgrid did not create expected input: {path}")
             validate_metgrid_file(path)
+            if config.wrf.urban_physics:
+                urban_checks.append(validate_urban_fraction_file(path, (config.center.latitude, config.center.longitude)))
+    if urban_checks:
+        (wps_directory / 'urban_fraction_validation.json').write_text(json.dumps(urban_checks, indent=2) + '\n')
 
 
 def _prepare_wrf_run(config: ExperimentConfig, project_root: Path, case_directory: Path, wps: Path) -> Path:

@@ -353,9 +353,13 @@ def ensure_geographic_data(root: Path) -> Path:
 
 def prepare_forecast_data(config: ExperimentConfig, project_root: Path) -> PreparedForecastData:
     valid_times = _three_hour_times(config)
+    geographic = ensure_geographic_data(project_root / "data/geographic")
+    if config.wrf.urban_fraction_source == 'gaia2020':
+        from weather_sim.data.urban import urban_geographic_overlay
+        geographic = urban_geographic_overlay(project_root / "data/geographic", geographic, _download)
     return PreparedForecastData(
         valid_times=valid_times,
         msm_files=download_msm(valid_times, project_root / "data/meteorological/msm"),
         gfs_files=download_gfs(valid_times, project_root / "data/meteorological/gfs"),
-        geographic_directory=ensure_geographic_data(project_root / "data/geographic"),
+        geographic_directory=geographic,
     )

@@ -2,7 +2,7 @@
 
 地形付き3Dアニメーションと雲の2D動画6種類を追加しました。既存結果へ `./scripts/animate_weather_case.sh output/old` を実行すると不足分だけ生成します。操作と気象量の定義は [3D・雲動画マニュアル](docs/animation_3d.md) を参照してください。
 
-2026-09-07更新：`run-case` の既定設定は `config/msm_guided.yaml`（MSMナッジング、親領域60分出力）です。最新の水蒸気強化実験は湿度が改善する一方、気温が悪化したため既定にはしていません。[最新評価と追加改善](docs/evaluation_moisture_followup.md)を参照してください。太陽高度による短波補間だけを変える未検証候補は `--template config/msm_guided_solar.yaml` です。
+2026-09-08更新：`run-case` の既定設定は `config/msm_guided.yaml`（MSMナッジング、親領域60分出力）です。水蒸気強化は気温を悪化させ、太陽高度による短波補間の気温改善は約0.3%でした。[最新評価と都市面の見直し](docs/evaluation_20260908.md)を参照してください。新しい未検証候補は `--template config/msm_guided_urban.yaml`（Noah＋SLUCM、GAIA 2020都市被覆率）です。初回は約30 MBの追加データを取得し、別の地理データ領域に約1.87 GB展開します。既存地理データを変更せず、都市率が入力されたことを検査します。
 
 同じ日時・領域・入力の再実験では、検査済みmetgrid出力を `data/cache/metgrid/` から再利用します。設定、実行バイナリ、地形、MSM/GFS中間データと出力をSHA-256で確認し、復元後も物理範囲検査を行います。利用記録は各ケースの `wps/metgrid_cache.json`。再計算して比較する場合やWPSの共有ライブラリ更新後は `--no-metgrid-cache` を指定してください。WRFの時間刻み・演算精度は変更しません。
 

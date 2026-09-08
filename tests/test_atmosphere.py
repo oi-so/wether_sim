@@ -35,6 +35,18 @@ def test_overlap_distinguishes_contiguous_clouds_and_clear_gaps():
     assert np.isnan(cloud_overlap(np.array([np.nan,.5])[:,None,None])).all()
 
 
+def test_cloud_band_trimming_preserves_clear_gaps_missing_and_empty_columns():
+    # Outside NaNs must be ignored; an interior clear layer separates clouds.
+    fraction = np.array([[np.nan, .5, .5], [.5, .3, .5], [0., .4, .5],
+                         [.5, np.nan, .5], [np.nan, .5, .5]])[:, None, :]
+    mask = np.zeros_like(fraction, dtype=bool)
+    mask[1:4, 0, :2] = True
+    result = cloud_overlap(fraction, mask)
+    assert result[0, 0] == 75.
+    assert np.isnan(result[0, 1])  # Included missing layer.
+    assert np.isnan(result[0, 2])  # No levels in band, not clear sky.
+
+
 def test_temperature_wind_rotation_height_and_dry_mass_integral():
     dataset = atmosphere()
     frame = volume_frame(dataset.isel(Time=0))

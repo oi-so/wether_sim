@@ -186,6 +186,7 @@ def render_namelist_input(config: ExperimentConfig) -> str:
  swint_opt = {config.wrf.shortwave_interpolation},
  sf_sfclay_physics = {_values([1] * count)}
  sf_surface_physics = {_values([2] * count)}
+ sf_urban_physics = {_values([config.wrf.urban_physics] * count)}
  bl_pbl_physics = {_values([1] * count)}
  bldt = {_values([0] * count)}
  cu_physics = {_values([1] + [0] * (count - 1))}

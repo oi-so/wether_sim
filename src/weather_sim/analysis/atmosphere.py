@@ -26,7 +26,7 @@ def unstagger(values: np.ndarray, axis: int) -> np.ndarray:
     return (values[tuple(lower)] + values[tuple(upper)]) * 0.5
 
 
-def thermodynamics(frame: xr.Dataset) -> dict[str, np.ndarray]:
+def thermodynamics(frame: xr.Dataset, *, include_humidity: bool = True) -> dict[str, np.ndarray]:
     """Single time, native mass grid. RH is relative to liquid water."""
     pressure = np.asarray(frame.P + frame.PB)
     temperature = (np.asarray(frame.T) + 300.0) * (pressure / 100000.0) ** (RD / CP)
@@ -36,11 +36,14 @@ def thermodynamics(frame: xr.Dataset) -> dict[str, np.ndarray]:
     thickness = np.diff(interface_height, axis=0)
     if np.any(thickness <= 0):
         raise WRFOutputError('non-positive WRF layer thickness')
-    vapor_pressure = mixing_ratio * pressure / (EPSILON + mixing_ratio)
-    saturation = 611.2 * np.exp(17.67 * (temperature - 273.15) / (temperature - 29.65))
-    return dict(pressure=pressure, temperature=temperature, height=height,
-                thickness=thickness, humidity=np.clip(100 * vapor_pressure / saturation, 0, 100),
+    result = dict(pressure=pressure, temperature=temperature, height=height,
+                thickness=thickness,
                 dry_density=pressure / (RD * temperature * (1 + mixing_ratio / EPSILON)))
+    if include_humidity:
+        vapor_pressure = mixing_ratio * pressure / (EPSILON + mixing_ratio)
+        saturation = 611.2 * np.exp(17.67 * (temperature - 273.15) / (temperature - 29.65))
+        result['humidity'] = np.clip(100 * vapor_pressure / saturation, 0, 100)
+    return result
 
 
 def cloud_overlap(fraction: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
@@ -50,6 +53,14 @@ def cloud_overlap(fraction: np.ndarray, mask: np.ndarray | None = None) -> np.nd
     An empty altitude band is missing, not clear sky.
     """
     included = np.ones_like(fraction, dtype=bool) if mask is None else mask
+    if mask is not None:
+        # Exterior excluded layers contribute only multiplication by one and
+        # zero blocks. Trim those layers, keeping every interior clear gap.
+        active = np.flatnonzero(np.any(included, axis=tuple(range(1, included.ndim))))
+        if not active.size:
+            return np.full(fraction.shape[1:], np.nan)
+        band = slice(active[0], active[-1] + 1)
+        fraction, included = fraction[band], included[band]
     valid = np.isfinite(fraction)
     values = np.where(included & valid, np.clip(fraction, 0, 1), 0)
     clear_probability = np.ones(fraction.shape[1:], dtype=np.float64)
@@ -73,7 +84,7 @@ def cloud_columns(dataset: xr.Dataset) -> xr.Dataset:
     frames: dict[str, list[np.ndarray]] = {name: [] for name in names}
     for index in range(dataset.sizes['Time']):
         frame = dataset.isel(Time=index)
-        thermo = thermodynamics(frame)
+        thermo = thermodynamics(frame, include_humidity=False)
         height_agl = thermo['height'] - np.asarray(frame.HGT)
         fraction = np.asarray(frame.CLDFRA)
         masks = [None, (height_agl >= 300) & (height_agl < 2000),

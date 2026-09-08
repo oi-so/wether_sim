@@ -157,8 +157,16 @@ class WRFConfig:
     nudging_temperature_s: float = 0.0003
     nudging_moisture_s: float = 0.00001
     shortwave_interpolation: int = 0
+    urban_physics: int = 0
+    urban_fraction_source: str = 'none'
 
     def __post_init__(self) -> None:
+        if self.urban_physics not in (0, 1):
+            raise ConfigurationError('wrf.urban_physics must be 0 (bulk) or 1 (SLUCM)')
+        if self.urban_fraction_source not in ('none', 'gaia2020'):
+            raise ConfigurationError('wrf.urban_fraction_source must be none or gaia2020')
+        if (self.urban_physics == 1) != (self.urban_fraction_source == 'gaia2020'):
+            raise ConfigurationError('SLUCM requires explicit gaia2020 urban fractions; bulk uses none')
         if self.shortwave_interpolation not in (0, 1):
             raise ConfigurationError("wrf.shortwave_interpolation must be 0 or 1 (solar zenith interpolation)")
         if self.input_interval_seconds <= 0:
@@ -293,6 +301,8 @@ class ExperimentConfig:
                 nudging_temperature_s=float(wrf.get("nudging_temperature_s", 0.0003)),
                 nudging_moisture_s=float(wrf.get("nudging_moisture_s", 0.00001)),
                 shortwave_interpolation=int(wrf.get("shortwave_interpolation", 0)),
+                urban_physics=int(wrf.get('urban_physics', 0)),
+                urban_fraction_source=str(wrf.get('urban_fraction_source', 'none')),
             ),
             source_path=source_path,
         )
