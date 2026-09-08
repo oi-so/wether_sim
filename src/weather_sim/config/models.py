@@ -156,8 +156,11 @@ class WRFConfig:
     nudging_uv_s: float = 0.0003
     nudging_temperature_s: float = 0.0003
     nudging_moisture_s: float = 0.00001
+    shortwave_interpolation: int = 0
 
     def __post_init__(self) -> None:
+        if self.shortwave_interpolation not in (0, 1):
+            raise ConfigurationError("wrf.shortwave_interpolation must be 0 or 1 (solar zenith interpolation)")
         if self.input_interval_seconds <= 0:
             raise ConfigurationError("wrf.input_interval_seconds must be positive")
         if self.time_step_seconds <= 0:
@@ -289,6 +292,7 @@ class ExperimentConfig:
                 nudging_uv_s=float(wrf.get("nudging_uv_s", 0.0003)),
                 nudging_temperature_s=float(wrf.get("nudging_temperature_s", 0.0003)),
                 nudging_moisture_s=float(wrf.get("nudging_moisture_s", 0.00001)),
+                shortwave_interpolation=int(wrf.get("shortwave_interpolation", 0)),
             ),
             source_path=source_path,
         )

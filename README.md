@@ -2,7 +2,9 @@
 
 地形付き3Dアニメーションと雲の2D動画6種類を追加しました。既存結果へ `./scripts/animate_weather_case.sh output/old` を実行すると不足分だけ生成します。操作と気象量の定義は [3D・雲動画マニュアル](docs/animation_3d.md) を参照してください。
 
-2026-09-05更新：`run-case` の既定設定は `config/msm_guided.yaml`（MSMナッジング、親領域60分出力）です。精度は検証中です。従来条件との比較は `--template config/case_20260901.yaml` を指定できます。完走結果と速度の確認は [追加評価](docs/evaluation_20260905_followup.md) を参照してください。
+2026-09-07更新：`run-case` の既定設定は `config/msm_guided.yaml`（MSMナッジング、親領域60分出力）です。最新の水蒸気強化実験は湿度が改善する一方、気温が悪化したため既定にはしていません。[最新評価と追加改善](docs/evaluation_moisture_followup.md)を参照してください。太陽高度による短波補間だけを変える未検証候補は `--template config/msm_guided_solar.yaml` です。
+
+同じ日時・領域・入力の再実験では、検査済みmetgrid出力を `data/cache/metgrid/` から再利用します。設定、実行バイナリ、地形、MSM/GFS中間データと出力をSHA-256で確認し、復元後も物理範囲検査を行います。利用記録は各ケースの `wps/metgrid_cache.json`。再計算して比較する場合やWPSの共有ライブラリ更新後は `--no-metgrid-cache` を指定してください。WRFの時間刻み・演算精度は変更しません。
 
 指定した地点周辺の局地気象を、WRF（Weather Research and Forecasting Model）を用いて高解像度で再現・予測するためのプロジェクトです。
 

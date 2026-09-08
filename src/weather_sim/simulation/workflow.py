@@ -20,6 +20,7 @@ from weather_sim.errors import ExternalCommandError, ObservationDataError
 from weather_sim.observations.jma_download import download_fuchu_amedas
 from weather_sim.simulation.namelists import write_namelists
 from weather_sim.simulation.runtime_cache import cache_thompson_tables, restore_thompson_tables
+from weather_sim.simulation.metgrid_cache import input_signature, cache_key, restore_metgrid, publish_metgrid
 from weather_sim.visualization.animation import create_standard_animations
 from weather_sim.visualization.plots import plot_surface_field
 from weather_sim.visualization.volume import create_volume_animation
@@ -107,6 +108,7 @@ def _prepare_wps(
     project_root: Path,
     case_directory: Path,
     data: PreparedForecastData,
+    *, use_metgrid_cache: bool = True,
 ) -> Path:
     wps_root = project_root / "wrf/WPS-4.7.0"
     wps_bin = wps_root / "install_clang/bin"
@@ -158,8 +160,33 @@ def _prepare_wps(
         for valid_time in data.valid_times:
             name = f"{prefix}:{valid_time:%Y-%m-%d_%H}"
             _replace_symlink(directory / name, source_directory / name)
-    _run([str(wps_bin / "metgrid")], directory, "metgrid.stdout.log", {"OMPI_MCA_btl": "self,vader"})
+    inputs = {"namelist.wps": directory / "namelist.wps", "METGRID.TBL": directory / "metgrid/METGRID.TBL",
+              "metgrid.exe": wps_bin / "metgrid"}
+    for domain in range(1, len(config.domains) + 1):
+        name = f"geo_em.d{domain:02d}.nc"
+        inputs[name] = directory / name
+    for valid_time in data.valid_times:
+        for prefix, folder in (("MSM", msm), ("GFS", gfs)):
+            name = f"{prefix}:{valid_time:%Y-%m-%d_%H}"
+            inputs[name] = folder / name
+    names = [f"met_em.d{domain:02d}.{stamp:%Y-%m-%d_%H:%M:%S}.nc"
+             for stamp in data.valid_times for domain in range(1, len(config.domains) + 1)]
+    cache_root = project_root / "data/cache/metgrid"
+    cache_started = perf_counter()
+    signature = input_signature(inputs) if use_metgrid_cache else {}
+    restored = use_metgrid_cache and restore_metgrid(cache_root, signature, directory, names)
+    cache_seconds = perf_counter() - cache_started
+    if restored:
+        print(f"Reused verified metgrid output ({len(names)} files)")
+    else:
+        _run([str(wps_bin / "metgrid")], directory, "metgrid.stdout.log", {"OMPI_MCA_btl": "self,vader"})
     _validate_metgrid_inputs(directory, config)
+    if use_metgrid_cache and not restored:
+        publish_metgrid(cache_root, signature, directory, names)
+    (directory / "metgrid_cache.json").write_text(json.dumps({
+        "enabled": use_metgrid_cache, "hit": restored, "key": cache_key(signature) if use_metgrid_cache else None,
+        "lookup_and_restore_seconds": cache_seconds,
+    }, indent=2) + "\n")
     return directory
 
 
@@ -238,6 +265,7 @@ def run_case(
     case_name: str | None = None,
     processes: int = 4,
     download_only: bool = False,
+    use_metgrid_cache: bool = True,
 ) -> Path:
     """Download inputs and optionally run WPS, WRF, and visualization."""
     if processes < 1:
@@ -295,7 +323,7 @@ def run_case(
     data = prepare_forecast_data(config, project_root)
     if download_only:
         return case_directory
-    wps = _prepare_wps(config, project_root, case_directory, data)
+    wps = _prepare_wps(config, project_root, case_directory, data, use_metgrid_cache=use_metgrid_cache)
     run_directory = _prepare_wrf_run(config, project_root, case_directory, wps)
     _run([str(run_directory / "real.exe")], run_directory, "real.stdout.log", {"OMPI_MCA_btl": "self,vader"})
     if config.wrf.grid_nudging:

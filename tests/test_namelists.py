@@ -63,3 +63,24 @@ def test_default_cli_profile_applies_msm_nudging_and_parent_output_reduction() -
     assert "grid_fdda = 1, 1, 1," in text
     assert "history_interval = 60, 60, 10," in text
     assert "gfdda_end_h = 15, 15, 15," in text
+
+
+def test_solar_candidate_changes_only_shortwave_interpolation():
+    from dataclasses import asdict, replace
+    import pytest
+    from weather_sim.config import load_config
+    from weather_sim.errors import ConfigurationError
+    from weather_sim.simulation.namelists import render_namelist_input
+    base = load_config("config/msm_guided.yaml")
+    candidate = load_config("config/msm_guided_solar.yaml")
+    a, b = asdict(base), asdict(candidate)
+    a.pop("source_path")
+    b.pop("source_path")
+    assert b["wrf"]["shortwave_interpolation"] == 1
+    b["wrf"]["shortwave_interpolation"] = 0
+    assert a == b
+    baseline_text = render_namelist_input(base)
+    candidate_text = render_namelist_input(candidate)
+    assert baseline_text.replace("swint_opt = 0", "swint_opt = 1") == candidate_text
+    with pytest.raises(ConfigurationError, match="shortwave_interpolation"):
+        replace(base.wrf, shortwave_interpolation=2)

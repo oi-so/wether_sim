@@ -79,6 +79,7 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--processes", type=int, default=4, help="MPI process count for wrf.exe")
     run.add_argument("--download-only", action="store_true", help="download inputs without running WPS/WRF")
     run.add_argument("--no-animation", action="store_true", help="run WRF without exporting an animation")
+    run.add_argument("--no-metgrid-cache", action="store_true", help="recompute metgrid for controlled comparisons")
 
     animate = subparsers.add_parser(
         "animate-case",
@@ -329,6 +330,7 @@ def _run_case(args: argparse.Namespace) -> int:
         case_name=args.case_name,
         processes=args.processes,
         download_only=args.download_only,
+        use_metgrid_cache=not args.no_metgrid_cache,
     )
     print(output.resolve())
     return 0
