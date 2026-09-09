@@ -159,8 +159,11 @@ class WRFConfig:
     shortwave_interpolation: int = 0
     urban_physics: int = 0
     urban_fraction_source: str = 'none'
+    source_cycle_policy: str = 'auto'
 
     def __post_init__(self) -> None:
+        if self.source_cycle_policy not in ("auto", "continuous", "latest"):
+            raise ConfigurationError("wrf.source_cycle_policy must be auto, continuous or latest")
         if self.urban_physics not in (0, 1):
             raise ConfigurationError('wrf.urban_physics must be 0 (bulk) or 1 (SLUCM)')
         if self.urban_fraction_source not in ('none', 'gaia2020'):
@@ -295,6 +298,7 @@ class ExperimentConfig:
                 metgrid_levels=int(wrf.get("metgrid_levels", 27)),
                 metgrid_soil_levels=int(wrf.get("metgrid_soil_levels", 4)),
                 top_pressure_pa=int(wrf.get("top_pressure_pa", 5000)),
+                source_cycle_policy=str(wrf.get("source_cycle_policy", "auto")),
                 grid_nudging=bool(wrf.get("grid_nudging", False)),
                 grid_nudging_in_pbl=bool(wrf.get("grid_nudging_in_pbl", True)),
                 nudging_uv_s=float(wrf.get("nudging_uv_s", 0.0003)),

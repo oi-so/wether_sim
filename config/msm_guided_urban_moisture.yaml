@@ -1,0 +1,48 @@
+# Unvalidated single-parameter moisture-nudging sensitivity experiment.
+# Compare against msm_guided_urban.yaml on day/night and an independent event.
+# gq relaxation time: 27.8 h -> 9.26 h; does not impose a dry bias or rescale rain.
+center:
+  latitude: 35.69247912845154
+  longitude: 139.41296806119965
+
+time:
+  target_start: "2026-09-04T12:00:00+09:00"
+  target_end: "2026-09-04T20:00:00+09:00"
+  timezone: "Asia/Tokyo"
+  spinup_hours: 6
+
+domains:
+  d01: {dx_m: 9000, e_we: 100, e_sn: 100}
+  d02: {dx_m: 3000, e_we: 100, e_sn: 100, parent: d01, parent_grid_ratio: 3}
+  d03: {dx_m: 1000, e_we: 100, e_sn: 100, parent: d02, parent_grid_ratio: 3}
+
+analysis:
+  radius_km: 20
+  output_interval_minutes: 10
+  parent_output_interval_minutes: 60
+
+observations:
+  use_amedas: true
+  use_school: true
+
+visualization:
+  animation: false
+  animation_format: mp4
+  fps: 6
+
+wrf:
+  input_interval_seconds: 10800
+  time_step_seconds: 54
+  vertical_levels: 45
+  metgrid_levels: 17
+  metgrid_soil_levels: 4
+  top_pressure_pa: 10000
+  map_projection: lambert
+  grid_nudging: true
+  grid_nudging_in_pbl: true
+  nudging_uv_s: 0.0003
+  nudging_temperature_s: 0.0003
+  nudging_moisture_s: 0.00003
+  shortwave_interpolation: 1
+  urban_physics: 1
+  urban_fraction_source: gaia2020

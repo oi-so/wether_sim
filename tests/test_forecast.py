@@ -197,3 +197,60 @@ def test_successful_plan_is_used_and_recorded_before_downloads(monkeypatch,tmp_p
     result=forecast.prepare_forecast_data(load_config('config/msm_guided.yaml'),tmp_path)
     assert set(result.source_selection['models'])=={'msm','gfs'}
     assert result.source_selection['models']['msm'][0]['forecast_hours']==0
+
+
+def test_latest_policy_anchors_future_suffix_to_newest_published_cycle():
+    valid = tuple(_utc(8, hour) for hour in (0, 3, 6, 9, 12, 15, 18))
+    seen = []
+    def published(cycle, target):
+        seen.append((cycle, target))
+        return cycle <= _utc(8, 6)  # 09 UTC initialization is not published yet.
+    result = _cycle_assignments(valid, cycle_interval_hours=3, max_forecast_hours=15,
+                                now=_utc(8, 10), available=published, policy='latest')
+    assert list(result) == list(valid)
+    assert all(result[t] == _utc(8, 6) for t in valid if t >= _utc(8, 6))
+    assert all(c <= t and c <= _utc(8, 10) for c, t in seen)
+    assert all(0 <= (t-c).total_seconds()/3600 <= 15 for t,c in result.items())
+    legacy = _cycle_assignments(valid, cycle_interval_hours=3, max_forecast_hours=15,
+                                now=_utc(8, 10), available=published)
+    assert legacy[_utc(8, 15)] == _utc(8, 0)
+    assert result[_utc(8, 15)] == _utc(8, 6)
+
+
+def test_latest_policy_does_not_replace_missing_data_with_out_of_range_forecast():
+    with pytest.raises(ExternalCommandError, match='no published forecast'):
+        _cycle_assignments((_utc(8, 18),), cycle_interval_hours=3, max_forecast_hours=15,
+                           now=_utc(8, 10), available=lambda c,t: c <= _utc(8, 0), policy='latest')
+
+
+def test_cycle_policy_and_moisture_candidate_are_explicit():
+    from dataclasses import replace
+    from weather_sim.config import load_config
+    from weather_sim.errors import ConfigurationError
+    baseline = load_config('config/msm_guided_urban.yaml')
+    candidate = load_config('config/msm_guided_urban_moisture.yaml')
+    assert baseline.wrf.source_cycle_policy == 'auto'
+    assert replace(candidate.wrf, nudging_moisture_s=baseline.wrf.nudging_moisture_s) == baseline.wrf
+    assert candidate.wrf.nudging_moisture_s == 3e-5
+    with pytest.raises(ConfigurationError, match='source_cycle_policy'):
+        replace(baseline.wrf, source_cycle_policy='invalid')
+
+
+@pytest.mark.parametrize('now,expected', [(_utc(4, 6),'latest'), (_utc(5, 0),'continuous')])
+def test_auto_policy_distinguishes_future_target_from_hindcast(monkeypatch,tmp_path,now,expected):
+    from weather_sim.data import forecast
+    from weather_sim.config import load_config
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now
+    monkeypatch.setattr(forecast,'datetime',Clock)
+    def select(times,root,model,**kwargs):
+        assert kwargs['policy'] == expected
+        return {t:times[0] for t in times}
+    monkeypatch.setattr(forecast,'select_forecast_cycles',select)
+    monkeypatch.setattr(forecast,'ensure_geographic_data',lambda root:root)
+    monkeypatch.setattr(forecast,'download_msm',lambda *a,**kw:())
+    monkeypatch.setattr(forecast,'download_gfs',lambda *a,**kw:())
+    result=forecast.prepare_forecast_data(load_config('config/msm_guided.yaml'),tmp_path)
+    assert result.source_selection['cycle_policy'] == expected

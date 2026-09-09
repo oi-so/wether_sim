@@ -108,11 +108,14 @@ def _cycle_assignments(
     max_forecast_hours: int,
     now: datetime | None = None,
     available: Callable[[datetime, datetime], bool] | None = None,
+    policy: str = "continuous",
 ) -> dict[datetime, datetime]:
     """Reuse published cycles, searching older forecasts when necessary.
 
     Future valid times are permitted; future initialization times are not.
     """
+    if policy not in ("continuous", "latest"):
+        raise ValueError("cycle policy must be continuous or latest")
     if cycle_interval_hours <= 0 or 24 % cycle_interval_hours:
         raise ValueError("cycle_interval_hours must be a positive divisor of 24")
     if max_forecast_hours < 0:
@@ -142,8 +145,11 @@ def _cycle_assignments(
         return checked[key]
     assignments: dict[datetime, datetime] = {}
     cycle: datetime | None = None
-    for valid_time in valid_times:
-        if cycle is None or valid_time - cycle > timedelta(hours=max_forecast_hours) or not usable(cycle, valid_time):
+    # Reverse traversal anchors the forecast suffix to its freshest published cycle.
+    # Reuse it backwards until its initialization, avoiding a cycle change at every boundary.
+    ordered_times = reversed(valid_times) if policy == "latest" else valid_times
+    for valid_time in ordered_times:
+        if cycle is None or valid_time < cycle or valid_time - cycle > timedelta(hours=max_forecast_hours) or not usable(cycle, valid_time):
             upper = min(valid_time, now)
             candidate = upper.replace(
                 hour=upper.hour - upper.hour % cycle_interval_hours,
@@ -163,7 +169,7 @@ def _cycle_assignments(
                     'data may be unpublished or absent from this archive; shorten the period or retry later'
                 )
         assignments[valid_time] = cycle
-    return assignments
+    return {valid: assignments[valid] for valid in valid_times}
 
 
 def _remote_exists(url: str) -> bool:
@@ -198,7 +204,7 @@ def _gfs_paths(cycle: datetime, valid: datetime, root: Path) -> tuple[str, Path]
 
 
 def select_forecast_cycles(valid_times: tuple[datetime, ...], root: Path, model: str,
-                           *, now: datetime | None = None) -> dict[datetime, datetime]:
+                           *, now: datetime | None = None, policy: str = "continuous") -> dict[datetime, datetime]:
     """Check publication/local cache before downloading; memoize HEAD requests."""
     if model not in ('msm', 'gfs'):
         raise ValueError('model must be msm or gfs')
@@ -219,7 +225,7 @@ def select_forecast_cycles(valid_times: tuple[datetime, ...], root: Path, model:
         return exists(url + '.idx') and exists(url)
     return _cycle_assignments(valid_times, cycle_interval_hours=3 if model == 'msm' else 6,
                               max_forecast_hours=15 if model == 'msm' else 120,
-                              now=now, available=available)
+                              now=now, available=available, policy=policy)
 
 
 def _msm_names(cycle: datetime) -> tuple[str, str]:
@@ -444,8 +450,11 @@ def prepare_forecast_data(config: ExperimentConfig, project_root: Path) -> Prepa
     valid_times = _three_hour_times(config)
     now = datetime.now(timezone.utc)
     roots = {model: project_root / 'data/meteorological' / model for model in ('msm', 'gfs')}
-    assignments = {model: select_forecast_cycles(valid_times, root, model, now=now) for model, root in roots.items()}
-    selection = {'selected_at_utc': now.isoformat(), 'models': {
+    policy = config.wrf.source_cycle_policy
+    if policy == "auto":
+        policy = "latest" if config.time.target_end.astimezone(timezone.utc) > now else "continuous"
+    assignments = {model: select_forecast_cycles(valid_times, root, model, now=now, policy=policy) for model, root in roots.items()}
+    selection = {'selected_at_utc': now.isoformat(), 'cycle_policy': policy, 'models': {
         model: [{'valid_time_utc': valid.isoformat(), 'initialization_utc': cycle.isoformat(),
                  'forecast_hours': int((valid - cycle).total_seconds() / 3600)} for valid, cycle in mapping.items()]
         for model, mapping in assignments.items()}}

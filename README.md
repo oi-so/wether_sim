@@ -441,3 +441,5 @@ WRFの各出力時刻に最も近い実観測を1件対応させ、Bias・MAE・
 - `real.exe`: 3領域の `wrfinput` と `wrfbdy_d01` の生成成功を確認済み
 
 本校のCP932・1分値WSNログと、気象庁の府中10分値は `scripts/prepare_case_20260901.py` で共通long形式へ変換できます。任意日時の自動ワークフローは追加済みですが、ユーザー指定によりこの変更時点では新ワークフロー自体のテスト実行は行っていません。
+
+予測入力は `wrf.source_cycle_policy: auto` が既定です。未来を含む対象は新しい公開済み入力を終了側から選び、過去再現は従来の連続サイクルを使用します。比較用に `latest` / `continuous` を明示できます。過湿の感度実験用 `config/msm_guided_urban_moisture.yaml` は未検証の候補です。[修正内容と検証条件](docs/evaluation_20260909.md#6-報告書を受けた修正再計算なし)を参照してください。
