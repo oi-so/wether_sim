@@ -52,3 +52,7 @@ nodes.get('windScale').value='4';nodes.get('windScale').oninput();flush();
 const span2=evalCode('(()=>{const a=Array.from(windGlyphs(geometry,0)).filter((_,i)=>i%6===0);return Math.max(...a)-Math.min(...a)})()');
 assert(span2>span1,'wind size control enlarges billboard arrow triangles');
 console.log('PASS: independent map switch, 0 m floor, wind size control and filled arrows.');
+assert.equal(evalCode('geometry.length%36'),0,'each original arrow has a shaft and two open wing segments');
+assert.equal(evalCode('windGlyphs(geometry).length'),evalCode('geometry.length*3'),'each line is widened without adding an outline');
+const lineWidth=evalCode('(()=>{const a=windGlyphs(geometry),p=project(...a.slice(0,3)),q=project(...a.slice(30,33));return Math.hypot(p[0]-q[0],p[1]-q[1])})()');
+assert(Math.abs(lineWidth-1.5)<1e-4,'original line arrow is widened to 1.5 CSS pixels');
